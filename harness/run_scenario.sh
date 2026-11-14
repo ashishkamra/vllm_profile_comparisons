@@ -2,7 +2,7 @@
 # Run one GuideLLM scenario against an already-running server.
 #   harness/run_scenario.sh sync cpu-int8
 # Results land in results/<tag>-<scenario>/benchmarks.{json,csv}
-set -eu
+set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 SCENARIO=${1:?usage: run_scenario.sh <sync|conc8|sweep> <tag>}
@@ -18,7 +18,7 @@ curl -sf -X POST "$TARGET/reset_prefix_cache" >/dev/null || true
 
 # preemption count before/after: a non-zero delta invalidates cross-device arithmetic
 PREEMPT_BEFORE=$(curl -sf "$TARGET/metrics" 2>/dev/null \
-  | awk '/^vllm:num_preemptions_total/ {s+=$2} END {print s+0}')
+  | awk '/^vllm:num_preemptions_total/ {s+=$2} END {print s+0}' || true)
 
 echo "+ guidellm run $SCENARIO ($TAG) -> $OUT" >&2
 GUIDELLM__DEFAULT_RESULTS_DIR="$OUT" "$(guidellm_bin)" run \
@@ -28,7 +28,7 @@ GUIDELLM__DEFAULT_RESULTS_DIR="$OUT" "$(guidellm_bin)" run \
   | tee "$OUT/console.txt"
 
 PREEMPT_AFTER=$(curl -sf "$TARGET/metrics" 2>/dev/null \
-  | awk '/^vllm:num_preemptions_total/ {s+=$2} END {print s+0}')
+  | awk '/^vllm:num_preemptions_total/ {s+=$2} END {print s+0}' || true)
 PREEMPT_AFTER=${PREEMPT_AFTER:-0}
 PREEMPT_BEFORE=${PREEMPT_BEFORE:-0}
 

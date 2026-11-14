@@ -16,5 +16,11 @@ __pycache__/
 # bench outputs that are regenerable
 guidellm-*.html
 
+# per-run server logs: host-specific noise, and the numbers they would evidence
+# come from benchmarks.json / summary.csv instead
+results/*.serve.log
+results/*.profile.log
+results/*.profile.console.txt
+
 # load-generator venv (guidellm + matplotlib)
 .venv-loadgen/

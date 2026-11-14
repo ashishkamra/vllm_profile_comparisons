@@ -10,6 +10,9 @@ set -eu
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 DEVICE=${DEVICE:?set DEVICE=cpu|gpu}
+# VARIANTS lets one variant be re-run without redoing the other (e.g. after a
+# partial failure). Default is every variant the device defines.
+VARIANTS=${VARIANTS:-$(variants_for "$DEVICE")}
 
 "$R/harness/collect_env.sh" > "$R/results/env-$DEVICE-$(hostname).txt"
 if [ "$DEVICE" = "cpu" ]; then
@@ -24,11 +27,12 @@ if ss -lptnH "sport = :$PORT" 2>/dev/null | grep -q .; then
   exit 1
 fi
 
-for VARIANT in $(variants_for "$DEVICE"); do
+for VARIANT in $VARIANTS; do
   TAG="$DEVICE-$VARIANT"
 
   echo "=================== $TAG: throughput scenarios ==================="
-  "$R/harness/serve.sh" > "$R/results/$TAG.serve.log" 2>&1 &
+  DEVICE="$DEVICE" VARIANT="$VARIANT" \
+    "$R/harness/serve.sh" > "$R/results/$TAG.serve.log" 2>&1 &
   SERVER_PID=$!
   trap 'kill -TERM $SERVER_PID 2>/dev/null || true' EXIT
 
@@ -51,7 +55,7 @@ for VARIANT in $(variants_for "$DEVICE"); do
 done
 
 echo "=================== analysis ==================="
-for VARIANT in $(variants_for "$DEVICE"); do
+for VARIANT in $VARIANTS; do
   TAG="$DEVICE-$VARIANT"
   for SCENARIO in $SCENARIOS; do
     shopt -s nullglob
@@ -64,4 +68,5 @@ for VARIANT in $(variants_for "$DEVICE"); do
 done
 
 "$ANALYSIS_PY" "$R/analysis/plot_compare.py" "$R"/results/*-stages.csv --out "$R/figures" || true
+"$ANALYSIS_PY" "$R/harness/summarize.py" --results "$R/results" --out "$R/results/summary.csv" || true
 echo "done. figures in $R/figures, metrics in $R/results"

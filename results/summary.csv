@@ -1,0 +1,5 @@
+run,strategy,duration_s,req_ok,req_incomplete,req_errored,req_per_s,out_tok_per_s,ttft_ms_mean,ttft_ms_p95,itl_ms_mean,itl_ms_p95,preempt_delta
+cpu-int8-conc8,concurrent,60.0,15,8,0,0.25,32.0,4388.1,6594.2,203.7,298.3,0
+cpu-int8-sync,synchronous,399.7,60,0,0,0.1501,19.22,697.7,720.8,46.9,47.8,0
+cpu-ref-conc8,concurrent,60.0,8,8,0,0.1333,17.07,7710.4,10236.3,293.4,337.7,0
+cpu-ref-sync,synchronous,780.3,60,0,0,0.0769,9.84,1369.6,1403.1,91.6,95.6,0

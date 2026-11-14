@@ -30,7 +30,18 @@ CPU-side analogue of FP8, not the same numerics — see
 |---|---|---|---|
 | `sync` | `synchronous` | 512 prompt / 128 output tokens | 60 requests |
 | `conc8` | `concurrent, streams=8` | 512 / 128 | 60 s |
-| `sweep` | `sweep` | 512 / 128 | 30 s per point |
+| `sweep` | `sweep` (opt-in) | 512 / 128 | 30 s per point |
+
+`sweep` is not in the default set. Its second strategy probes throughput at
+concurrency 16, which needs ~16 x 128 / throughput seconds to finish a single
+round; on this host one 512/128 request takes 13 s, so that point completed **zero**
+of its 16 requests inside a 30 s window and GuideLLM refused to compile the
+benchmark (`No measurement start or end times available`). The rate ladder it then
+interpolated ran *down* through 0.06-0.03 req/s — below what `sync` (0.077) and
+`conc8` (0.133) already measure directly. The run is kept in
+[`results/evidence/failed-sweep-cpu-ref.txt`](results/evidence/failed-sweep-cpu-ref.txt).
+Enable it where the payload fits:
+`SCENARIOS="sync conc8 sweep" SWEEP_SECONDS=180 harness/run_matrix.sh`.
 
 **Where time goes** — three profilers, each answering a different question:
 
@@ -74,26 +85,30 @@ analysis/demo.sh
 harness/build_cpu.sh
 
 # 0c. record what you are measuring with, then prove it
-harness/collect_env.sh   > results/env-$(hostname).txt
-harness/probe_isa.sh     > results/isa-$(hostname).txt   # CPU leg only
-DEVICE=cpu VARIANT=int8 harness/check_serve.sh           # boot + one completion + shut down
+harness/collect_env.sh   > results/env-cpu-$(hostname).txt
+harness/probe_isa.sh     > results/isa-cpu-$(hostname).txt   # CPU leg only
+DEVICE=cpu VARIANT=int8 harness/check_serve.sh               # boot + one completion + shut down
 
 # 1. serve the model; the device/variant pair is the only switch
 DEVICE=cpu VARIANT=int8 harness/serve.sh &
 
-# 2. load (three scenarios, identical on both legs)
-for s in sync conc8 sweep; do harness/run_scenario.sh $s cpu-int8; done
+# 2. load (the default set is identical on both legs; `sweep` is opt-in, see R4)
+for s in sync conc8; do harness/run_scenario.sh $s cpu-int8; done
 
 # 3. profile one scenario (writes a trace, not a benchmark; see R9 in docs/02)
 DEVICE=cpu VARIANT=int8 harness/profile_scenario.sh conc8
 
 # ...or do the whole leg in one go
 DEVICE=cpu harness/run_matrix.sh
+# ...or one variant/scenario of it, after a partial failure
+DEVICE=cpu VARIANT=int8 SCENARIOS=conc8 harness/run_matrix.sh
 
-# 4. analyse + plot
+# 4. analyse, plot, and tabulate
+PY=.venv-loadgen/bin/python        # analysis needs matplotlib; vLLM's venv does not have it
 "$PY" analysis/analyze_trace.py --trace traces/cpu-int8-conc8/*.json.gz \
        --out results/cpu-int8-conc8-stages.csv
 "$PY" analysis/plot_compare.py results/*-stages.csv --out figures/
+"$PY" harness/summarize.py --results results --out results/summary.csv
 ```
 
 Profiled runs are single-process (`VLLM_ENABLE_V1_MULTIPROCESSING=0`) and bounded by engine
@@ -101,12 +116,62 @@ iterations (`max_iterations=20`), because a multiprocess profile only records th
 frontend and an unbounded concurrent profile never finishes writing its trace. Throughput
 runs keep vLLM's defaults. See [R9](docs/02-methodology.md).
 
+## Results: CPU leg
+
+Intel i7-12800H, 14 threads (physical cores), vLLM v0.33.0 built with `-march=native`,
+`--max-num-seqs 16`, 512 prompt / 128 output tokens per request, GuideLLM 0.8.1.
+Preemption count is 0 for every scenario (checked around each run; the server logs
+contain no preemption events).
+
+| run | requests ok/incomplete | req/s | output tok/s | TTFT mean | ITL mean |
+|---|---|---|---|---|---|
+| `cpu-ref-sync` (fp32) | 60 / 0 | 0.077 | 9.8 | 1370 ms | 91.6 ms |
+| `cpu-int8-sync` (W8A8) | 60 / 0 | 0.150 | 19.2 | 698 ms | 46.9 ms |
+| `cpu-ref-conc8` (fp32) | 8 / 8 | 0.133 | 17.1 | 7710 ms | 293.4 ms |
+| `cpu-int8-conc8` (W8A8) | 15 / 8 | 0.250 | 32.0 | 4388 ms | 203.7 ms |
+
+INT8 W8A8 is **1.95x** the fp32 generation rate at concurrency 1 and **1.87x** at
+concurrency 8. At concurrency 8 the fp32 point costs 7.7 s of TTFT for 17 output
+tok/s: on 14 cores the second stream buys almost nothing.
+
+Attributed work in the profiled `conc8` window (20 engine iterations, eager, same
+560 projections in both runs):
+
+| | fp32 | INT8 W8A8 | change |
+|---|---|---|---|
+| all linears | 9559 ms (79.9 %) | 5137 ms (65.7 %) | **-46 %** |
+| `linear.gate_up` | 3678 ms | 2041 ms | -44 % |
+| `linear.qkv` | 2417 ms | 1279 ms | -47 % |
+| `linear.down` | 1759 ms | 788 ms | -55 % |
+| `linear.o_proj` | 1263 ms | 587 ms | -54 % |
+| `linear.lm_head` | 442 ms (3.7 %) | 442 ms (5.7 %) | **unchanged** |
+| attention (`paged`) | 1216 ms (10.2 %) | 1281 ms (16.4 %) | +5 % |
+| elementwise | 846 ms (7.1 %) | 928 ms (11.9 %) | +10 % |
+| activation | 152 ms (1.3 %) | 162 ms (2.1 %) | +7 % |
+| int8 `quant` | - | 121 ms (1.5 %) | - |
+| engine scheduling | 2.2 ms | 0.5 ms | - |
+
+The whole INT8 gain comes from the GEMMs. Attention and elementwise work are not
+quantized, so their absolute cost is flat and their *share* rises: after
+quantization, ~1/3 of the model's attributed work is no longer in a GEMM, and
+`lm_head` — which the artifact leaves in fp32 — costs the same 442 ms in both runs
+(identical to the millisecond, which is a useful cross-check that the two traces
+are being measured the same way).
+
+Figures: [`figures/fig1-stages.png`](figures/fig1-stages.png),
+[`fig2-op-classes.png`](figures/fig2-op-classes.png),
+[`fig3-linear.png`](figures/fig3-linear.png). Numbers:
+[`results/summary.csv`](results/summary.csv), `results/*-stages.csv`.
+
+GPU leg: not yet run (no GPU on the CPU-side host). The command sequence is the same
+with `DEVICE=gpu`.
+
 ## Status
 
 - [x] Harness, stage taxonomy, analyzer, plot scaffolding
 - [x] CPU extension built from source with native ISA flags, verified end to end
       (fp32 and INT8 W8A8 both produce sane text; dispatched ISA and oneDNN kernel recorded)
-- [ ] CPU leg: reference (fp32) + INT8 W8A8 numbers
+- [x] CPU leg: reference (fp32) + INT8 W8A8 numbers
 - [ ] GPU leg: reference (bf16) + FP8 W8A8
 - [ ] Comparison figures
 

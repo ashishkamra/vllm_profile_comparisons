@@ -34,13 +34,27 @@ GuideLLM `0.8.1`, identical `--data` (prompt/output token counts), identical
 single source of truth for both legs. Token counts are *synthetic and exact*, so
 `prompt_tokens` must not be re-tuned per device.
 
+The default scenario set is `sync` and `conc8`. `sweep` is opt-in because its throughput
+probe has to complete a round of requests inside one window: at concurrency 16 with 128
+output tokens that is ~16 x 128 / throughput seconds, and on the CPU leg (13 s per
+512/128 request) the probe finished 0 of 16 requests in 30 s. That dragged its measured
+rate to 0.00 req/s and pushed the interpolated ladder down to 0.03-0.06 req/s — where the
+server is idle between requests and most points complete 0-2 requests — so GuideLLM
+raised `Cannot compile GenerativeMetrics: No measurement start or end times available`.
+The run is preserved in
+[`results/evidence/failed-sweep-cpu-ref.txt`](../results/evidence/failed-sweep-cpu-ref.txt).
+Both legs run the same default set, so this does not disturb R4.
+
 **R5 — Same server knobs.**
 `--max-model-len 2048 --max-num-seqs 16` on both. GPU adds
 `--gpu-memory-utilization 0.85` (8 GB card); the CPU leg pins
 `VLLM_CPU_KVCACHE_SPACE=4` (GiB, vLLM's documented default) and
 `OMP_NUM_THREADS` = the host's **physical** core count (14 here, via `lscpu`,
 not `nproc`, which follows the affinity mask and can change between runs) instead. Anything that changes scheduling behaviour must be
-identical, or the traces measure different schedulers. Preemption counts are scraped
+identical, or the traces measure different schedulers. The `sweep` profile's
+`max_concurrency` is capped at `max_num_seqs` (16): GuideLLM defaults to 512, which on a
+16-slot server measures queueing rather than the model, on both legs alike. Preemption
+counts are scraped
 around each run (`run_scenario.sh`): a non-zero delta marks the result invalid rather
 than letting a scheduler artefact be reported as a hardware difference.
 
@@ -78,8 +92,25 @@ rather than by wall clock. An unbounded concurrent profile writes a trace large 
 that `/stop_profile` times out on the RPC and the trace is never flushed; capping by
 iterations makes the trace size independent of scenario duration and keeps the profiled
 window comparable across scenarios and variants. Both legs use the same cap, so op *counts*
-are comparable too (`112` linears per iteration on the CPU int8 leg, `2240` scaled_mm calls
-over 20 iterations).
+are comparable too (`112` linears per iteration on the CPU int8 leg, i.e. `2240` scaled_mm
+calls over 20 iterations, and `560` calls of each individual projection).
+
+The window starts at `/start_profile`, i.e. while GuideLLM's first requests are still being
+admitted, so it contains the initial prefill burst and then steady-state decode. That mix
+is a property of the scenario, is identical on both legs, and is why the profile is read as
+"composition of the scenario window" rather than "decode-only cost". Per-request TTFT and
+ITL from `benchmarks.json` are the decode/prefill separation; the trace is the composition.
+
+**R10 — Every quoted mean carries its n.**
+GuideLLM computes its metrics over *completed* requests only. A duration-bounded scenario
+therefore leaves requests incomplete at the window edge (`conc8` on the CPU leg: 8 completed
+of 16 made for fp32, 15 of 24 for INT8), and `results` never mixes them into the means.
+`harness/summarize.py` copies `request_totals` next to every mean, so an incomplete
+fraction is always visible instead of being inferred.
+
+Numbers are read from `benchmarks.json`, not from GuideLLM's console summary: for the same
+run, 0.8.1's console table reported 15 completed requests where its own JSON records 8
+successful + 8 incomplete. The console is a log; the JSON is the artifact.
 
 ## Threats to validity (stated, not hidden)
 
@@ -107,6 +138,16 @@ be stated whenever CPU INT8 numbers are quoted:
 12th-gen mobile parts mix P-cores and E-cores. `OMP_NUM_THREADS` pins the thread count;
 it does not control *which* cores. Record `OMP_NUM_THREADS`, and keep it fixed across
 scenarios. Do not "tune" it per run.
+
+### One run per point, so no between-run error bars
+Each scenario is measured once. The `p95` columns in `results/summary.csv` are
+*distribution within a run* (over its requests or its inter-token intervals), not a
+confidence interval across runs; nothing here repeats a scenario to estimate run-to-run
+variance. The INT8 sync point was measured twice on separate server boots and moved by
+<1 % on throughput (19.29 -> 19.22 output tok/s, 0.151 -> 0.150 req/s), which is the only
+evidence about repetition in this repo. Treat differences under a few percent as noise,
+which is why the reported INT8 gain is stated to two significant figures rather than
+three.
 
 ### Host-specific ISA build (CPU leg)
 The CPU extension is compiled with `-march=native`, so the built `.so` uses every

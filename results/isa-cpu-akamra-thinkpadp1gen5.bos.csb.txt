@@ -1,0 +1,33 @@
+=== host ===
+akamra-thinkpadp1gen5.bos.csb
+model name	: 12th Gen Intel(R) Core(TM) i7-12800H
+CPU(s):                                  20
+Thread(s) per core:                      2
+Core(s) per socket:                      14
+Socket(s):                               1
+CPU(s) scaling MHz:                      48%
+
+=== extension variants on disk ===
+186575680 /home/akamra/workspace/vllm/vllm/_C.abi3.so
+93951512 /home/akamra/workspace/vllm/vllm/_C_AVX2.abi3.so
+108249456 /home/akamra/workspace/vllm/vllm/_C_AVX512.abi3.so
+
+=== dispatched variant (what an import gets) ===
+avx512_supported: False
+avx512_bf16_supported: False
+amx_tile_supported: False
+mapped_extension_libs: _C_AVX2.abi3.so
+
+=== instructions actually emitted in the dispatched .so ===
+  bmi2     2127
+  shlx     2092
+  sarx     16
+  rorx     19
+  fma      3457
+  avx512   0
+  zmm      0
+
+=== runtime ISA chosen by oneDNN for the int8 GEMM ===
+onednn_verbose,v1,info,cpu,isa:Intel AVX2 with Intel DL Boost
+onednn_verbose,v1,primitive,exec,cpu,matmul,brg_matmul:avx2_vnni,undef,src:s8::blocked:ab::f0 wei:s8::blocked:BA16a64b4a::f1:s8m2 dst:f32::blocked:ab::f0,attr-scratchpad:user attr-scales:wei:2:f32,,64x1024:1024x4096,0.511963
+probe: oneDNN gemm ran (64, 4096)

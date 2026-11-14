@@ -1,0 +1,34 @@
+Sweep profile on the CPU reference leg - the run that made `sweep` opt-in.
+(cpu-ref, Qwen/Qwen3-0.6B fp32, 512 prompt / 128 output tokens, 30 s per point)
+
+This is an excerpt of the leg's log: GuideLLM's per-strategy progress lines plus the
+error it finally raised. It is kept because `results/*/console.txt` only captures
+stdout, and the strategies report on stderr.
+
+Why it fails here: `sweep` first runs a synchronous point, then a throughput point at
+max_concurrency=16, then interpolates rates between the two measured rates. A single
+512/128 request takes ~13 s on this CPU, so the throughput point finished 0 of its 16
+requests inside its 30 s window, which drags its rate to 0.00 req/s and pushes the
+interpolated ladder *down* to 0.06-0.03 req/s. At 0.03 req/s a point issues one request
+every 33 s, so most points complete 0-2 requests and one has no measurement window at
+all, and GuideLLM cannot compile the benchmark:
+
+  ValueError: Cannot compile GenerativeMetrics: No measurement start or end times available.
+
+That ladder is also the wrong region: `sync` already measures 0.077 req/s and `conc8`
+0.133 req/s, so the sweep spends minutes sampling rates where the server is idle
+between requests. It adds nothing that `sync` and `conc8` do not already measure.
+
+--------------------------------------------------------------------------------
+Benchmark 1 (synchronous): started | elapsed=0.0s | successful=0 errored=0 incomplete=0 | requests/s=0.00 output_tokens/s=0.00
+Benchmark 1 (synchronous): completed | elapsed=32.3s | successful=2 errored=0 incomplete=1 | requests/s=0.07 output_tokens/s=8.53
+Benchmark 2 (throughput@16): started | elapsed=0.0s | successful=0 errored=0 incomplete=0 | requests/s=0.00 output_tokens/s=0.00
+Benchmark 2 (throughput@16): completed | elapsed=32.8s | successful=0 errored=0 incomplete=16 | requests/s=0.00 output_tokens/s=0.00
+Benchmark 3 (constant@0.06): started | elapsed=0.0s | successful=0 errored=0 incomplete=0 | requests/s=0.00 output_tokens/s=0.00
+Benchmark 3 (constant@0.06): completed | elapsed=50.0s | successful=2 errored=0 incomplete=0 | requests/s=0.07 output_tokens/s=8.53
+Benchmark 4 (constant@0.05): started | elapsed=0.0s | successful=0 errored=0 incomplete=0 | requests/s=0.00 output_tokens/s=0.00
+Benchmark 4 (constant@0.05): completed | elapsed=52.8s | successful=1 errored=0 incomplete=1 | requests/s=0.03 output_tokens/s=4.27
+Benchmark 5 (constant@0.04): started | elapsed=0.0s | successful=0 errored=0 incomplete=0 | requests/s=0.00 output_tokens/s=0.00
+Benchmark 5 (constant@0.04): completed | elapsed=56.8s | successful=1 errored=0 incomplete=1 | requests/s=0.03 output_tokens/s=4.27
+Benchmark 6 (constant@0.03): started | elapsed=0.0s | successful=0 errored=0 incomplete=0 | requests/s=0.00 output_tokens/s=0.00
+Benchmark 6 (constant@0.03): completed | elapsed=32.9s | successful=0 errored=0 incomplete=0 | requests/s=0.00 output_tokens/s=0.00

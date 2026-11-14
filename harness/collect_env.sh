@@ -22,7 +22,12 @@ echo
 echo "=== host ==="
 uname -a
 echo "hostname=$(hostname)"
-echo "nproc=$(nproc)"
+# `nproc` honours OMP_NUM_THREADS, so it hides the real topology once the study
+# pins threads. Record what the kernel sees, independently of the study knobs.
+echo "cpus_online=$(getconf _NPROCESSORS_ONLN)"
+echo "cpus_all=$(nproc --all)"
+echo "physical_cores=$(lscpu -p=CORE,SOCKET 2>/dev/null | grep -v '^#' | sort -u | wc -l)"
+echo "affinity=$(taskset -pc $$ 2>/dev/null | sed 's/.*: //')"
 free -g | head -2
 
 echo
@@ -58,7 +63,9 @@ if command -v vllm >/dev/null 2>&1; then
   if [ -n "${SRC:-}" ] && [ -d "$SRC/.git" ]; then
     echo "vllm_source=$SRC"
     echo "vllm_source_head=$(git -C "$SRC" rev-parse HEAD 2>/dev/null)"
-    echo "vllm_source_dirty=$(git -C "$SRC" status --porcelain 2>/dev/null | wc -l) files"
+    # untracked files cannot change the built binary; only tracked edits can.
+    echo "vllm_source_dirty=$(git -C "$SRC" status --porcelain --untracked-files=no 2>/dev/null | wc -l) tracked files"
+    echo "vllm_source_untracked=$(git -C "$SRC" status --porcelain --untracked-files=all 2>/dev/null | grep -c '^??' || true) entries"
   fi
   "$PY" -c "from vllm.platforms import current_platform as p; print('platform', p.device_name, p.device_type)" 2>/dev/null || true
   "$PY" - <<'PYEOF' 2>/dev/null || true
@@ -86,7 +93,8 @@ echo "=== runner selection (must match across legs) ==="
 echo "VLLM_USE_V2_MODEL_RUNNER=${VLLM_USE_V2_MODEL_RUNNER:-<auto>}  (0=V1 pinned for both legs)"
 
 echo "=== guidellm ==="
-guidellm --version 2>/dev/null || echo "guidellm: not installed (pip install '$GUIDELLM_PIN')"
+echo "guidellm_bin=$(guidellm_bin 2>/dev/null || echo none)"
+"$(guidellm_bin)" --version 2>/dev/null || echo "guidellm: not installed (pip install '$GUIDELLM_PIN')"
 
 echo
 echo "=== build prerequisites (CPU leg) ==="

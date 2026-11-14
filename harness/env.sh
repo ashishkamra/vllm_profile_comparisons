@@ -110,7 +110,10 @@ scenario_args() {
   case "$1" in
     sync)   echo "--profile kind=synchronous --constraint kind=max_requests,count=$SYNC_COUNT" ;;
     conc8)  echo "--profile kind=concurrent,streams=8 --constraint kind=max_duration,seconds=$CONC8_SECONDS" ;;
-    sweep)  echo "--profile kind=sweep --constraint kind=max_duration,seconds=$SWEEP_SECONDS" ;;
+    # Sweep up to what the server is allowed to schedule. GuideLLM's default
+    # max_concurrency is 512, which on a 16-slot server measures the queue, not
+    # the model. Same cap on both legs (R5).
+    sweep)  echo "--profile kind=sweep,sweep_size=10,max_concurrency=$MAX_NUM_SEQS --constraint kind=max_duration,seconds=$SWEEP_SECONDS" ;;
     *) return 1 ;;
   esac
 }
@@ -122,5 +125,12 @@ backend_args() {  # backend_args <device> <variant>
   echo "kind=openai_http,target=$TARGET,model=$(model_for "$1" "$2"),request_format=/v1/completions"
 }
 
-SCENARIOS=${SCENARIOS:-"sync conc8 sweep"}
+# Default scenario set. `sweep` is opt-in: its throughput probe at concurrency
+# 16 needs roughly 16 x 128 / throughput seconds to complete a single round, so
+# on a host where one 512/128 request takes ~13 s it finishes zero requests in a
+# 30 s window and GuideLLM refuses to compile the empty benchmark. The rate range
+# it interpolates would also be 0.08-0.13 req/s, i.e. two nearly identical
+# points. Enable it explicitly where the payload fits:
+#   SCENARIOS="sync conc8 sweep" SWEEP_SECONDS=180 harness/run_matrix.sh
+SCENARIOS=${SCENARIOS:-"sync conc8"}
 DATA_ARGS=${DATA_ARGS:-"kind=synthetic_text,prompt_tokens=512,output_tokens=128"}
