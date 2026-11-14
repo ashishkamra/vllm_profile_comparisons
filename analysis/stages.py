@@ -233,8 +233,12 @@ def op_class_for(name: str, event_args: dict | None = None, *, vocab_size: int |
         return "norm"
     if "rotary" in name or "apply_rotary" in name:
         return "rope"
-    if name.startswith("aten::") and any(
-        a in name for a in ("silu", "gelu", "sigmoid", "silu_and_mul", "swiglu")
+    # Activation kernels are not always ATen ops: on CPU they arrive as
+    # aten::silu, but vLLM launches vllm::act_and_mul_kernel / silu_and_mul
+    # directly on GPU, so the name is what identifies them, not the prefix.
+    if any(
+        a in name
+        for a in ("silu", "gelu", "sigmoid", "silu_and_mul", "swiglu", "act_and_mul")
     ):
         return "activation"
     if any(a in name for a in ("argmax", "softmax", "topk", "gumbel", "multinomial")):

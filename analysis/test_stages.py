@@ -84,6 +84,8 @@ def test_attention_kernels_classified_on_both_devices():
 def test_elementwise_and_activation():
     assert stages.op_class_for("aten::silu") == "activation"
     assert stages.op_class_for("aten::mul") == "elementwise"
+    # GPU launches its own fused kernel; the ATen prefix is not available.
+    assert stages.op_class_for("void vllm::act_and_mul_kernel<c10::BFloat16, ...>") == "activation"
     assert stages.op_class_for("aten::rms_norm") == "norm"
 
 
