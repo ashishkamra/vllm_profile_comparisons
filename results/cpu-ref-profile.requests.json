@@ -8,28 +8,28 @@
   "records": [
     {
       "index": 0,
-      "seconds": 33.144,
+      "seconds": 34.752,
       "prompt_tokens": 512,
       "completion_tokens": 128
     },
     {
       "index": 1,
-      "seconds": 16.267,
+      "seconds": 19.457,
       "prompt_tokens": 512,
       "completion_tokens": 128
     },
     {
       "index": 2,
-      "seconds": 16.807,
+      "seconds": 19.023,
       "prompt_tokens": 512,
       "completion_tokens": 128
     },
     {
       "index": 3,
-      "seconds": 16.499,
+      "seconds": 17.956,
       "prompt_tokens": 512,
       "completion_tokens": 128
     }
   ],
-  "total_seconds": 82.717
+  "total_seconds": 91.188
 }

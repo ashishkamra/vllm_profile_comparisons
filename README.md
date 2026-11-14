@@ -160,6 +160,24 @@ Both legs use the reference variant so the weights are the same and only the dev
 differs. The dtype still differs by design (CPU `float32`, GPU `bfloat16`): the CPU has no
 bf16 hardware, so `dtype_for` gives each device its optimal precision.
 
+### Reading the two traces together
+
+`analysis/compare_runs.py` merges the two per-run CSVs into one op-class table (absolute
+ms, share, and the per-op ratio), and `analysis/plot_compare.py` draws the stage,
+op-class and projection bars from the same files:
+
+```bash
+analysis/compare_runs.py --cpu results/cpu-ref-profile-stages.csv \
+                         --gpu results/gpu-ref-profile-stages.csv \
+                         --out results/profile-compare.csv
+analysis/plot_compare.py results/cpu-ref-profile-stages.csv \
+                         results/gpu-ref-profile-stages.csv --out figures/profile
+```
+
+The result, with the per-step anatomy and the caveats (different metrics per device,
+different dtypes by design, why decode is bandwidth-bound and prefill is not), is in
+[`docs/05-cpu-vs-gpu-profile.md`](docs/05-cpu-vs-gpu-profile.md).
+
 ### GPU startup troubleshooting
 
 The GPU leg needs a host compiler that the installed CUDA toolkit accepts, and

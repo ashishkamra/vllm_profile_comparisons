@@ -1,0 +1,16 @@
+trace,device,metric,stage,op_class,ms,calls,pct
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,runner.prepare_inputs,python,0.2773,220,0.2
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,runner.glue,python,0.087,161,0.063
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,model.forward,python,0.6375,628,0.459
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,model.forward,norm,4.9275,2260,3.546
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,model.forward,linear.qkv,23.9382,560,17.226
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,model.forward,rope,1.464,560,1.054
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,model.forward,attention.kv_write,1.2929,560,0.93
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,model.forward,attention.paged,13.4439,1092,9.674
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,model.forward,linear.o_proj,12.546,560,9.028
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,model.forward,linear.gate_up,35.3386,560,25.43
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,model.forward,activation,1.2558,560,0.904
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,model.forward,linear.down,18.3207,560,13.183
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,runner.execute_model,python,0.1035,40,0.074
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,model.lm_head,linear.lm_head,25.0645,20,18.036
+rank0.1794694940841992126.pt.trace.json.gz,gpu,device_ms,sample,python,0.2692,99,0.194

@@ -1,0 +1,14 @@
+op_class,stage,cpu_ms,cpu_pct,gpu_ms,gpu_pct,cpu_over_gpu
+linear.qkv,model.forward,731.6865,19.262,23.9382,17.226,30.566
+linear.o_proj,model.forward,362.0453,9.531,12.546,9.028,28.857
+linear.gate_up,model.forward,1014.7171,26.713,35.3386,25.43,28.714
+linear.down,model.forward,554.5669,14.599,18.3207,13.184,30.27
+linear.lm_head,model.lm_head,478.8414,12.606,25.0645,18.036,19.104
+attention.paged,model.forward,211.0318,5.556,13.4439,9.674,15.697
+attention.kv_write,model.forward,36.6139,0.964,1.2929,0.93,28.319
+norm,model.forward,0.0,0.0,4.9275,3.546,
+rope,model.forward,50.5612,1.331,1.464,1.053,34.536
+activation,model.forward,27.5547,0.725,1.2558,0.904,21.942
+elementwise,model.forward,309.8074,8.156,0.0,0.0,
+sampler,sample,6.044,0.159,0.0,0.0,
+python,model.forward,15.1045,0.398,1.3745,0.989,10.989
