@@ -126,6 +126,19 @@ def test_gpu_gemm_without_enclosing_op_stays_coarse():
     assert A.gpu_op_class(events[1], None, vocab_size=151936) == "linear"
 
 
+def test_gpu_gemv_kernel_is_refined_too():
+    """At M=1 cuBLAS emits gemvx, so refinement must work for GEMV as well."""
+    gemv = {
+        "ph": "X", "cat": "kernel", "tid": 7, "ts": 900.0, "dur": 50.0,
+        "name": "std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, ...>",
+        "args": {"correlation": 5},
+    }
+    host = cpu_op(0.0, 100.0, 1, "aten::mm", [[1, 1024], [1024, 4096]])
+    events = [host, launch("cuda_runtime", "cudaLaunchKernel", 10.0, 5), gemv]
+    enclosing = A.EnclosingOps(events)
+    assert A.gpu_op_class(gemv, enclosing.op_at(1, 10.0), vocab_size=151936) == "linear.qkv"
+
+
 def test_gpu_gemm_with_non_linear_enclosing_op_stays_coarse():
     host = cpu_op(0.0, 100.0, 1, "aten::add", [[8, 1024], [8, 1024]])
     assert A.gpu_op_class(kernel(900.0, 50.0, 5), host, vocab_size=151936) == "linear"

@@ -85,6 +85,10 @@ LINEAR_MARKERS = (
     "sgl_gemm",
     "cutlass_scaled_mm",
     "gemm",
+    # cuBLAS's matrix-vector kernel. At M=1 (decode) every projection is a GEMV,
+    # and the name contains no "gemm" -- so without this the largest slice of
+    # decode device time is classed "python" (43.7 of 139.3 ms on a 0.6B trace).
+    "gemv",
 )
 
 QUANT_MARKERS = (

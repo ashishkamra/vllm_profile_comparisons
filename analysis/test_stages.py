@@ -108,6 +108,16 @@ def test_aten_addmm_skips_the_bias():
     ) == "linear.qkv"
 
 
+def test_cublas_gemv_is_a_linear_projection():
+    # M=1 decode: cuBLAS picks its GEMV kernel, whose name says "gemv", not
+    # "gemm". Missing this put the biggest kernel of the GPU trace in "python".
+    name = (
+        "std::enable_if<!(false), void>::type internal::gemvx::kernel"
+        "<int, int, __nv_bfloat16, __nv_bfloat16, ...>"
+    )
+    assert stages.op_class_for(name, {}) == "linear"
+
+
 def test_cpu_onednn_gemms_are_classified_by_shape():
     # The CPU leg emits no aten::linear. These dims are copied from a real
     # v0.33 CPU int8 trace (rank0): [out, input, scale, ..., weight_scale, ...].
