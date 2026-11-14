@@ -18,7 +18,9 @@ the stage. `with_stack=True` is required.
 | `engine.schedule` | `v1/core/sched/scheduler.py` (`schedule`) |
 | `engine.kv_cache` | `v1/core/kv_cache_manager.py`, `v1/core/block_pool.py`, `v1/core/kv_cache_utils.py` |
 | `engine.postprocess` | `v1/core/sched/scheduler.py` (`update_from_output`, `_free_request`) |
-| `runner.prepare_inputs` | `v1/worker/gpu/model_runner.py` (`prepare_inputs`), `v1/worker/cpu/attn_utils.py`, `_cpu_ops` slot-mapping helpers |
+| `runner.prepare_inputs` | any model-runner file, function matching `prepare_input` |
+| `runner.execute_model` | any model-runner file, function matching `execute_model` |
+| `runner.glue` | any other frame in a model-runner file |
 | `model.forward` | `vllm/model_executor/models/`, `vllm/model_executor/layers/` |
 | `model.lm_head` | shape rule, see Axis B (`N = vocab_size`) |
 | `sample` | `v1/worker/*/sample/`, `v1/worker/cpu/sampler.py`, `v1/sample/ops/` |
@@ -41,7 +43,7 @@ vocab 151936):
 
 | (K, N) | op class | layer |
 |---|---|---|
-| (1024, 2048) | `linear.qkv` | fused Q/K/V projection |
+| (1024, 4096) | `linear.qkv` | fused Q/K/V (2048 + 1024 + 1024) |
 | (2048, 1024) | `linear.o_proj` | attention output projection |
 | (1024, 6144) | `linear.gate_up` | fused gate+up |
 | (3072, 1024) | `linear.down` | down projection |

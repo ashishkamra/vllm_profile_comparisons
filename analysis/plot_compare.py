@@ -28,6 +28,8 @@ STAGE_ORDER = [
     "engine.kv_cache",
     "engine.postprocess",
     "runner.prepare_inputs",
+    "runner.execute_model",
+    "runner.glue",
     "model.forward",
     "model.lm_head",
     "sample",

@@ -7,6 +7,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 SCENARIO=${1:?usage: run_scenario.sh <sync|conc8|sweep> <tag>}
 TAG=${2:?usage: run_scenario.sh <sync|conc8|sweep> <tag>}
+# TAG is "<device>-<variant>"; the backend spec needs both to name the model.
+DEVICE=${DEVICE:-${TAG%%-*}}
+VARIANT=${VARIANT:-${TAG#*-}}
 EXTRA=$(scenario_args "$SCENARIO") || { echo "unknown scenario $SCENARIO" >&2; exit 2; }
 OUT="$R/results/$TAG-$SCENARIO"
 
@@ -18,8 +21,8 @@ PREEMPT_BEFORE=$(curl -sf "$TARGET/metrics" 2>/dev/null \
   | awk '/^vllm:num_preemptions_total/ {s+=$2} END {print s+0}')
 
 echo "+ guidellm run $SCENARIO ($TAG) -> $OUT" >&2
-GUIDELLM__DEFAULT_RESULTS_DIR="$OUT" guidellm run \
-  --backend "kind=openai_http,target=$TARGET" \
+GUIDELLM__DEFAULT_RESULTS_DIR="$OUT" "$(guidellm_bin)" run \
+  --backend "$(backend_args "$DEVICE" "$VARIANT")" \
   $EXTRA \
   --data "$DATA_ARGS" \
   | tee "$OUT/console.txt"

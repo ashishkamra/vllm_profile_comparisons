@@ -45,8 +45,8 @@ echo "+ start_profile" >&2
 curl -sf -X POST "$TARGET/start_profile" >/dev/null
 
 EXTRA=$(scenario_args "$SCENARIO")
-GUIDELLM__DEFAULT_RESULTS_DIR="$R/results/$TAG-$SCENARIO" guidellm run \
-  --backend "kind=openai_http,target=$TARGET" \
+GUIDELLM__DEFAULT_RESULTS_DIR="$R/results/$TAG-$SCENARIO" "$(guidellm_bin)" run \
+  --backend "$(backend_args "$DEVICE" "$VARIANT")" \
   $EXTRA \
   --data "$DATA_ARGS" \
   > "$R/results/$TAG-$SCENARIO.profile.console.txt" 2>&1

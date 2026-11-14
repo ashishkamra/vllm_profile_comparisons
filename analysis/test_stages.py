@@ -30,6 +30,27 @@ def test_worker_stages():
     )
 
 
+def test_both_model_runners_are_recognised():
+    # v0.33 ships V1 (flat file) and V2 (package); a run must be analysable either way
+    v1 = "vllm/v1/worker/gpu_model_runner.py"
+    v2 = "vllm/v1/worker/gpu/model_runner.py"
+    for path in (v1, v2):
+        assert stages.stage_for_frame(path, "_prepare_inputs") == "runner.prepare_inputs"
+        assert stages.stage_for_frame(path, "execute_model") == "runner.execute_model"
+        assert stages.stage_for_frame(path, "_dummy_run") == "runner.glue"
+
+
+def test_cpu_runner_subclasses():
+    assert (
+        stages.stage_for_frame("vllm/v1/worker/cpu_model_runner.py", "execute_model")
+        == "runner.execute_model"
+    )
+    assert (
+        stages.stage_for_frame("vllm/v1/worker/cpu/model_runner.py", "prepare_inputs")
+        == "runner.prepare_inputs"
+    )
+
+
 def test_unknown_frame_is_other_never_guessed():
     assert stages.stage_for_frame("random/module.py", "fn") == "other"
 

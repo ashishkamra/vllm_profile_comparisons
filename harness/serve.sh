@@ -39,8 +39,12 @@ fi
 if [ -n "${PROFILE_DIR:-}" ]; then
   mkdir -p "$PROFILE_DIR"
   if [ "$DEVICE" = "gpu" ]; then ACT='["CPU","CUDA"]'; else ACT='["CPU"]'; fi
-  ARGS+=(--profiler-config "{\"profiler\":\"torch\",\"torch_profiler_dir\":\"$PROFILE_DIR\",\"torch_profiler_activities\":$ACT,\"torch_profiler_with_stack\":true,\"torch_profiler_use_gzip\":true}")
+  # record_shapes is OFF by default at 0.33. Without it the analyzer cannot tell
+  # qkv from o_proj from lm_head (docs/03-stage-taxonomy.md axis B), so the whole
+  # per-layer breakdown would collapse into "linear". It costs some overhead; it
+  # is enabled identically on both legs.
+  ARGS+=(--profiler-config "{\"profiler\":\"torch\",\"torch_profiler_dir\":\"$PROFILE_DIR\",\"torch_profiler_activities\":$ACT,\"torch_profiler_with_stack\":true,\"torch_profiler_record_shapes\":true,\"torch_profiler_use_gzip\":true}")
 fi
 
 echo "+ vllm ${ARGS[*]}" >&2
-exec vllm "${ARGS[@]}"
+exec "$PY" -m vllm.entrypoints.cli.main "${ARGS[@]}"

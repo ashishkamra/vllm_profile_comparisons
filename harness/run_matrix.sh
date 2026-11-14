@@ -47,10 +47,10 @@ for VARIANT in $(variants_for "$DEVICE"); do
     TRACES=("$R/traces/$TAG-$SCENARIO"/*.json.gz)
     shopt -u nullglob
     [ ${#TRACES[@]} -eq 0 ] && continue
-    python "$R/analysis/analyze_trace.py" --trace "${TRACES[@]}" \
+    "$PY" "$R/analysis/analyze_trace.py" --trace "${TRACES[@]}" \
       --out "$R/results/$TAG-$SCENARIO-stages.csv"
   done
 done
 
-python "$R/analysis/plot_compare.py" "$R"/results/*-stages.csv --out "$R/figures" || true
+"$PY" "$R/analysis/plot_compare.py" "$R"/results/*-stages.csv --out "$R/figures" || true
 echo "done. figures in $R/figures, metrics in $R/results"

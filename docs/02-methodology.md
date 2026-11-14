@@ -36,9 +36,12 @@ single source of truth for both legs. Token counts are *synthetic and exact*, so
 
 **R5 — Same server knobs.**
 `--max-model-len 2048 --max-num-seqs 16` on both. GPU adds
-`--gpu-memory-utilization 0.85` (8 GB card); CPU has no equivalent knob and allocates
-from RAM. Anything that changes scheduling behaviour must be identical, or the traces
-measure different schedulers.
+`--gpu-memory-utilization 0.85` (8 GB card); the CPU leg pins
+`VLLM_CPU_KVCACHE_SPACE=4` (GiB, vLLM's documented default) and
+`OMP_NUM_THREADS=$(nproc)` instead. Anything that changes scheduling behaviour must be
+identical, or the traces measure different schedulers. Preemption counts are scraped
+around each run (`run_scenario.sh`): a non-zero delta marks the result invalid rather
+than letting a scheduler artefact be reported as a hardware difference.
 
 **R6 — Profiling runs are separate from throughput runs, and eager.**
 `--enforce-eager` for every profiled run on GPU: CUDA graph capture turns N kernel
@@ -46,7 +49,19 @@ launches into one replay node, which destroys op-level attribution. Headline thr
 numbers are taken *without* `--enforce-eager` and reported separately, because eager mode
 understates GPU performance. Both numbers are published; they answer different questions.
 
-**R7 — Fixtures before interpretation.**
+The profile also sets `torch_profiler_record_shapes=true`. It is **off** by default at
+v0.33.0 and costs some overhead, but without input shapes every projection collapses into
+one `linear` bucket: the analyzer cannot separate `qkv`, `o_proj`, `gate_up`, `down` or
+`lm_head`, which is half of what the comparison is for. It is enabled identically on both
+legs, so the overhead is symmetric.
+
+**R7 — Same model runner on both legs.**
+v0.33.0 has two model runners (see `docs/01-architecture.md`). Triton is disabled on a
+CPU-only host, so auto-selection would put the GPU on V2 and the CPU on V1. Both legs are
+pinned with `VLLM_USE_V2_MODEL_RUNNER=0` (V1). Recorded in `collect_env.sh` output; a run
+whose runner differs from the other leg is not comparable.
+
+**R8 — Fixtures before interpretation.**
 Each scenario is run once warm (prefix cache warm, allocator warm) and then measured.
 `/reset_prefix_cache` between runs so run N is not accelerated by run N-1.
 
@@ -76,6 +91,14 @@ be stated whenever CPU INT8 numbers are quoted:
 12th-gen mobile parts mix P-cores and E-cores. `OMP_NUM_THREADS` pins the thread count;
 it does not control *which* cores. Record `OMP_NUM_THREADS`, and keep it fixed across
 scenarios. Do not "tune" it per run.
+
+### Host-specific ISA build (CPU leg)
+The CPU extension is compiled with `-march=native`, so the built `.so` uses every
+extension this host has (here `-march=alderlake`: AVX2, AVX-VNNI, GFNI, VAES, BMI2, FMA).
+It is therefore only valid on the build host, and the numbers are a statement about *this*
+CPU. Two consequences: (a) do not ship that wheel anywhere else; (b) if the CPU leg is
+ever rebuilt on different hardware, the profile changes for reasons unrelated to vLLM.
+`results/env-*.txt` records the expansion.
 
 ### Host CPU on the GPU leg
 The 4060's host CPU does tokenization, scheduling, detokenization, and kernel launches.

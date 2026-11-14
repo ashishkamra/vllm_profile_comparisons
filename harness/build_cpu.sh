@@ -17,7 +17,18 @@ export VLLM_TARGET_DEVICE=cpu
 export MAX_JOBS=${MAX_JOBS:-$(nproc)}
 export CMAKE_BUILD_PARALLEL_LEVEL=$MAX_JOBS
 
+# Build with every ISA extension the build host has. This makes the wheel
+# host-specific: it must only be run on the machine that built it. Record the
+# expansion (results/env-*.txt) because it changes the kernels under test.
+export CXXFLAGS="${CXXFLAGS:--march=native}"
+export CFLAGS="${CFLAGS:--march=native}"
+
 cd "$VLLM_SRC"
+
+echo "### build-host ISA"
+gcc ${CXXFLAGS} -Q --help=target 2>/dev/null | grep -E "^\s+-march=|^\s+-mtune=" || true
+gcc ${CXXFLAGS} -Q --help=target 2>/dev/null \
+  | grep -E "\-mavx2\b|\-mavxvnni|\-mavx512f|\-mamx-tile|\-mfma\b" || true
 
 if [ ! -f /usr/include/numa.h ]; then
   echo "ERROR: /usr/include/numa.h missing. Install numactl-devel (Fedora) or" >&2
@@ -31,6 +42,10 @@ if [ "$HEAD" != "$VLLM_COMMIT" ]; then
   echo "         results are not comparable across commits. Ctrl-C to abort." >&2
   sleep 5
 fi
+
+# cmake caches compile flags in the build tree, so a flag change (or a version
+# switch) needs a fresh configure or the old flags silently win.
+rm -rf "$VLLM_SRC/.deps" "$VLLM_SRC/build"
 
 echo "### venv (python 3.12: the version CI builds and the wheels target)"
 uv venv --python 3.12 "$VLLM_SRC/.venv"
@@ -46,4 +61,10 @@ uv pip install --python "$PY" -e . --no-build-isolation --torch-backend=cpu
 
 echo "### verify"
 "$PY" -c "import vllm; print('vllm', vllm.__version__)"
+"$PY" - <<'PYEOF'
+import glob, os
+import vllm._cpu_ops as ops
+d = os.path.dirname(ops.__file__)
+print("compiled extension variants:", sorted(os.path.basename(p) for p in glob.glob(os.path.join(d, "_C*.so"))))
+PYEOF
 "$PY" -c "from vllm.platforms import current_platform as p; print('platform', p.device_name, p.device_type)"

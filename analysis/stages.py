@@ -21,7 +21,6 @@ FRAME_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("frontend.detokenize", ("v1/engine/detokenizer.py", "tokenizer.decode")),
     ("frontend.tokenize", (
         "v1/engine/input_processor.py",
-        "v1/engine/inputs/",
         "entrypoints/llm.py",
         "tokenizer.encode",
     )),
@@ -39,16 +38,11 @@ FRAME_RULES: list[tuple[str, tuple[str, ...]]] = [
         "v1/core/kv_cache_utils.py",
         "v1/core/kv_cache_coordinator.py",
     )),
-    # worker
-    ("runner.prepare_inputs", (
-        "v1/worker/gpu/model_runner.py",
-        "v1/worker/cpu/attn_utils.py",
-        "v1/worker/cpu/input_batch.py",
-    )),
+    # sampling (shared sampler lives under v1/sample at v0.33, v1/worker/*/sample later)
     ("sample", (
         "v1/worker/gpu/sample/",
         "v1/worker/cpu/sampler.py",
-        "v1/sample/ops/",
+        "v1/sample/",
         "layers/sampler.py",
     )),
     # model
@@ -59,8 +53,20 @@ FRAME_RULES: list[tuple[str, tuple[str, ...]]] = [
     )),
 ]
 
+# vLLM v0.33.0 ships *two* model runners and picks one by config/env:
+#   V1  vllm/v1/worker/gpu_model_runner.py  (+ cpu_model_runner.py subclass)
+#   V2  vllm/v1/worker/gpu/model_runner.py  (+ cpu/model_runner.py subclass)
+# Both are classified the same way so a run is analysable whichever is active.
+RUNNER_FILES = (
+    "v1/worker/gpu/model_runner.py",
+    "v1/worker/gpu_model_runner.py",
+    "v1/worker/cpu_model_runner.py",
+    "v1/worker/cpu/model_runner.py",
+)
+
 # Frames that live in a file that also hosts scheduler work (update_from_output etc.)
 POSTPROCESS_MARKERS = ("update_from_output", "_free_request", "_update_request_with_output")
+POSTPROCESS_FUNCS = ("_update_states", "update_states", "finish_requests", "_free_request")
 
 # ---------------------------------------------------------------------------
 # Axis B: op class, from ATen op name and (optionally) tensor shapes.
@@ -79,7 +85,9 @@ KV_WRITE_MARKERS = ("reshape_and_cache", "cache_kernels", "concat_and_cache")
 # Qwen3-0.6B linear shapes -> sub-stage label. Unknown shapes fall back to
 # "linear[KxN]" and show up as such in the report (never silently merged).
 LINEAR_SHAPES: dict[tuple[int, int], str] = {
-    (1024, 2048): "linear.qkv",
+    # Qwen3-0.6B: hidden 1024, 16 Q heads / 8 KV heads, head_dim 128,
+    # intermediate 3072. Fused QKV output = 2048 (Q) + 1024 (K) + 1024 (V).
+    (1024, 4096): "linear.qkv",
     (2048, 1024): "linear.o_proj",
     (1024, 6144): "linear.gate_up",
     (3072, 1024): "linear.down",
@@ -106,6 +114,16 @@ def stage_for_frame(file: str, func: str) -> str:
     """Axis A for a single frame. Returns 'other' when nothing matches."""
     if "sched/scheduler.py" in file and func in POSTPROCESS_MARKERS:
         return "engine.postprocess"
+
+    if any(r in file for r in RUNNER_FILES):
+        if "prepare_input" in func:
+            return "runner.prepare_inputs"
+        if "execute_model" in func:
+            return "runner.execute_model"
+        if func in POSTPROCESS_FUNCS:
+            return "engine.postprocess"
+        return "runner.glue"
+
     haystack = f"{file} {func}"
     for stage, markers in FRAME_RULES:
         if any(m in haystack for m in markers):
@@ -172,9 +190,9 @@ def op_class_for(name: str, event_args: dict | None = None, *, vocab_size: int |
 
 def refine_stage(stage: str, op_class: str) -> str:
     """Overrides where the op itself is more informative than the enclosing frame."""
-    if op_class == "linear.lm_head" and stage in ("model.forward", "other"):
+    if op_class == "linear.lm_head" and stage in ("model.forward", "runner.execute_model", "other"):
         return "model.lm_head"
-    if op_class == "sampler" and stage in ("frontend.other", "other"):
+    if op_class == "sampler" and stage in ("frontend.other", "runner.glue", "other"):
         return "sample"
     return stage
 
