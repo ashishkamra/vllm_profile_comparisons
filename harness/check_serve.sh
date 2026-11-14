@@ -6,7 +6,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 source harness/env.sh
 
 DEVICE=${DEVICE:?set DEVICE=cpu} VARIANT=${VARIANT:?set VARIANT=ref} \
-  setsid nohup harness/serve.sh > /tmp/opencode/serve-check.log 2>&1 < /dev/null &
+  setsid nohup harness/serve.sh > "${SERVE_CHECK_LOG:-${TMPDIR:-/tmp}/serve-check.log}" 2>&1 < /dev/null &
 
 for i in $(seq 1 300); do
   if curl -sf "$TARGET/health" >/dev/null 2>&1; then echo "HEALTH UP after ~$((i*2))s"; break; fi
