@@ -1,0 +1,22 @@
+The scheduler lives at the heart of every serving engine, and its job is deceptively
+simple: decide which requests to run on each step, how much room they get in the key
+value cache, and in what order their tokens are produced. A naive scheduler runs one
+request to completion before starting the next, which wastes both memory bandwidth and
+compute, because a single sequence can never saturate a modern processor. Batching fixes
+that, but batching introduces a new problem: prompts arrive with wildly different lengths,
+and the key value cache grows by a different amount for every sequence on every step.
+
+Paged attention solved the memory half of that problem by chopping the cache into fixed
+size blocks and handing out block tables, much like an operating system hands out pages.
+Once blocks are the unit of allocation, a scheduler can admit a new request in the middle
+of a batch, evict and reload blocks, or share a prefix between two requests that start
+with the same system message. The tradeoff is bookkeeping: every step now needs a slot
+mapping for writes, a block table for reads, and a plan for what happens when the pool of
+free blocks runs dry.
+
+The compute half is about keeping the arithmetic units busy. Prefill is a large matrix
+multiplication over all prompt tokens at once, so it is dominated by matmul throughput.
+Decode produces a single token per sequence, so it is dominated by reading the model
+weights and the cache, and the arithmetic intensity is low. That asymmetry is why engines
+split their attention between prefill and decode, why continuous batching matters, and
+why so much work goes into fusing small elementwise operations into the matmuls they feed.

@@ -1,0 +1,17 @@
+# traces and profiling artifacts are large and machine-specific
+traces/
+*.pt.trace.json
+*.pt.trace.json.gz
+*.nsys-rep
+*.sqlite
+perf.data*
+*.speedscope.json
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# bench outputs that are regenerable
+guidellm-*.html
