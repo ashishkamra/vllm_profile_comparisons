@@ -165,21 +165,37 @@ def _dims_of(event_args: dict) -> list[list[int]] | None:
 def linear_shape(name: str, event_args: dict) -> tuple[int, int] | None:
     """(K, N) for a GEMM event, else None.
 
-    Two dims layouts exist in practice:
-      aten::linear / aten::mm   Input Dims = [input (..., K), weight (N, K)]
-      vLLM custom kernels       Input Dims = [out (..., N), input (..., K), ...]
-    both with record_shapes=True. Getting this wrong silently mislabels every
-    projection, so the convention is selected from the op name, not guessed.
+    Three dims layouts exist in practice, and getting one wrong silently
+    mislabels projections rather than failing:
+
+      aten::linear   Input Dims = [input (..., K), weight (N, K)]
+      aten::mm / matmul / addmm
+                     Input Dims = [..., mat1 (M, K), mat2 (K, N)]
+                     (addmm additionally puts the 1-D bias first)
+      vLLM custom    Input Dims = [out (..., N), input (..., K), ...]
+    e.g. _C::onednn_mm / _C::onednn_scaled_mm, whose first arg is the output.
+
+    All with record_shapes=True. The convention is selected from the op name,
+    never guessed.
     """
     dims = _dims_of(event_args)
     if not dims or len(dims) < 2:
         return None
     try:
+        if name.startswith("aten::linear"):
+            a, b = dims[0], dims[1]
+            if not a or not b:
+                return None
+            return int(a[-1]), int(b[0])
+        if name.startswith(("aten::mm", "aten::matmul", "aten::addmm")):
+            # The last operand is the (K, N) matrix; its last dim is N.
+            a, b = dims[-2], dims[-1]
+            if not a or not b:
+                return None
+            return int(a[-1]), int(b[-1])
         a, b = dims[0], dims[1]
         if not a or not b:
             return None
-        if name.startswith(("aten::linear", "aten::mm", "aten::addmm", "aten::matmul")):
-            return int(a[-1]), int(b[0])
         return int(b[-1]), int(a[-1])
     except (TypeError, IndexError, ValueError):
         return None

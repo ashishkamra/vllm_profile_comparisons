@@ -88,7 +88,24 @@ def test_elementwise_and_activation():
 
 
 def test_unknown_linear_shape_is_reported_not_merged():
-    assert stages.op_class_for("aten::mm", {"Input Dims": [[4, 99], [77, 99]]}) == "linear[99x77]"
+    assert stages.op_class_for("aten::mm", {"Input Dims": [[4, 99], [99, 77]]}) == "linear[99x77]"
+
+
+def test_aten_mm_uses_the_mat2_layout():
+    # aten::mm is [mat1 (M, K), mat2 (K, N)], so N is the *last* dim. Parsing it
+    # like aten::linear's weight (N, K) yields (K, K) -- square, plausible
+    # looking, and wrong for every projection (seen on the GPU leg).
+    assert stages.linear_shape("aten::mm", {"Input Dims": [[1, 1024], [1024, 6144]]}) == (1024, 6144)
+    assert stages.op_class_for("aten::mm", {"Input Dims": [[1, 1024], [1024, 6144]]}) == "linear.gate_up"
+    assert stages.op_class_for("aten::mm", {"Input Dims": [[1, 2048], [2048, 1024]]}) == "linear.o_proj"
+    assert stages.op_class_for("aten::mm", {"Input Dims": [[1, 3072], [3072, 1024]]}) == "linear.down"
+
+
+def test_aten_addmm_skips_the_bias():
+    # addmm(bias, mat1, mat2): the bias is 1-D and first; the matrices are last.
+    assert stages.op_class_for(
+        "aten::addmm", {"Input Dims": [[4096], [8, 1024], [1024, 4096]]}
+    ) == "linear.qkv"
 
 
 def test_cpu_onednn_gemms_are_classified_by_shape():
