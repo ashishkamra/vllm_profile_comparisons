@@ -15,12 +15,24 @@ export PY
 
 vllm_cli() { "$PY" -m vllm.entrypoints.cli.main "$@"; }
 
+# Analysis runs on the tooling venv (it has matplotlib); the server venv stays
+# free of analysis-only dependencies.
+ANALYSIS_PY=${ANALYSIS_PY:-$R/.venv-loadgen/bin/python}
+[ -x "$ANALYSIS_PY" ] || ANALYSIS_PY="$PY"
+export ANALYSIS_PY
+
+# This host has openssl-libs but not the `openssl` CLI, and torch inductor shells
+# out to it when hashing a precompiled header. harness/tools/openssl implements
+# only that hashing call; see the file header. Harmless where openssl exists.
+export PATH="$R/harness/tools:$PATH"
+
+# GuideLLM lives in its own venv: it is a load generator, not part of the server,
+# and its dependency pins would otherwise fight vLLM's inside one environment.
 guidellm_bin() {
-  if [ -x "$(dirname "$PY")/guidellm" ]; then
-    echo "$(dirname "$PY")/guidellm"
-  else
-    command -v guidellm
-  fi
+  for c in "$R/.venv-loadgen/bin/guidellm" "$(dirname "$PY")/guidellm"; do
+    if [ -x "$c" ]; then echo "$c"; return; fi
+  done
+  command -v guidellm
 }
 
 # --- pins -------------------------------------------------------------------
@@ -46,7 +58,13 @@ export PORT=${PORT:-8000}
 export TARGET=${TARGET:-http://127.0.0.1:${PORT}}
 # CPU leg: pin the thread count and KV-cache budget explicitly. vLLM honours an
 # externally-set OMP_NUM_THREADS, so this is what the CPU numbers are measured at.
-export OMP_NUM_THREADS=${OMP_NUM_THREADS:-$(nproc)}
+# Default is *physical* cores (14 here): OMP threads beyond that oversubscribe the
+# SMT siblings and measurably slow the GEMMs. nproc is not used because it varies
+# with the process affinity mask and would silently change the measurement.
+_phys_cores() {
+  lscpu -p=CORE,SOCKET 2>/dev/null | grep -v '^#' | sort -u | wc -l
+}
+export OMP_NUM_THREADS=${VLLM_STUDY_OMP_THREADS:-$(_phys_cores)}
 export VLLM_CPU_KVCACHE_SPACE=${VLLM_CPU_KVCACHE_SPACE:-4}   # GiB, vLLM's documented default
 export VLLM_CPU_OMP_THREADS_BIND=${VLLM_CPU_OMP_THREADS_BIND:-auto}
 
@@ -81,11 +99,18 @@ variants_for() {
 
 # --- scenarios (identical on both devices, see docs/02-methodology.md R4) ----
 # prints: "<extra guidellm args>"
+# Defaults are the published scenario definition. The overrides exist so the
+# pipeline can be smoke-tested in ~30 s instead of ~30 min; any run made with an
+# override is a smoke test, not a study result (run_matrix.sh never sets them).
+SYNC_COUNT=${SYNC_COUNT:-60}
+CONC8_SECONDS=${CONC8_SECONDS:-60}
+SWEEP_SECONDS=${SWEEP_SECONDS:-30}
+
 scenario_args() {
   case "$1" in
-    sync)   echo "--profile kind=synchronous --constraint kind=max_requests,count=60" ;;
-    conc8)  echo "--profile kind=concurrent,streams=8 --constraint kind=max_duration,seconds=60" ;;
-    sweep)  echo "--profile kind=sweep --constraint kind=max_duration,seconds=30" ;;
+    sync)   echo "--profile kind=synchronous --constraint kind=max_requests,count=$SYNC_COUNT" ;;
+    conc8)  echo "--profile kind=concurrent,streams=8 --constraint kind=max_duration,seconds=$CONC8_SECONDS" ;;
+    sweep)  echo "--profile kind=sweep --constraint kind=max_duration,seconds=$SWEEP_SECONDS" ;;
     *) return 1 ;;
   esac
 }

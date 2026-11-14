@@ -71,6 +71,30 @@ POSTPROCESS_FUNCS = ("_update_states", "update_states", "finish_requests", "_fre
 # ---------------------------------------------------------------------------
 # Axis B: op class, from ATen op name and (optionally) tensor shapes.
 # ---------------------------------------------------------------------------
+# Every GEMM spelling the two legs actually emit. The CPU leg does not use
+# aten::linear at all: vLLM dispatches straight to oneDNN (_C::onednn_mm,
+# _C::onednn_scaled_mm) or to the sgl/cutlass kernels.
+LINEAR_MARKERS = (
+    "aten::linear",
+    "aten::mm",
+    "aten::addmm",
+    "aten::matmul",
+    "onednn_mm",
+    "onednn_scaled_mm",
+    "onednn_qconv",
+    "sgl_gemm",
+    "cutlass_scaled_mm",
+    "gemm",
+)
+
+QUANT_MARKERS = (
+    "dynamic_scaled_int8_quant",
+    "scaled_int8_quant",
+    "quantize_per_tensor",
+    "fp8_quant",
+    "_C::quant",
+)
+
 ATTENTION_MARKERS = (
     "cpu_attention_with_kv_cache",
     "paged_attention",
@@ -138,16 +162,25 @@ def _dims_of(event_args: dict) -> list[list[int]] | None:
     return dims
 
 
-def linear_shape(event_args: dict) -> tuple[int, int] | None:
-    """(K, N) for an aten::linear / aten::mm / aten::addmm event, else None."""
+def linear_shape(name: str, event_args: dict) -> tuple[int, int] | None:
+    """(K, N) for a GEMM event, else None.
+
+    Two dims layouts exist in practice:
+      aten::linear / aten::mm   Input Dims = [input (..., K), weight (N, K)]
+      vLLM custom kernels       Input Dims = [out (..., N), input (..., K), ...]
+    both with record_shapes=True. Getting this wrong silently mislabels every
+    projection, so the convention is selected from the op name, not guessed.
+    """
     dims = _dims_of(event_args)
     if not dims or len(dims) < 2:
         return None
     try:
-        in_dims, weight_dims = dims[0], dims[1]
-        if not in_dims or not weight_dims:
+        a, b = dims[0], dims[1]
+        if not a or not b:
             return None
-        return int(in_dims[-1]), int(weight_dims[0])
+        if name.startswith(("aten::linear", "aten::mm", "aten::addmm", "aten::matmul")):
+            return int(a[-1]), int(b[0])
+        return int(b[-1]), int(a[-1])
     except (TypeError, IndexError, ValueError):
         return None
 
@@ -164,14 +197,17 @@ def op_class_for(name: str, event_args: dict | None = None, *, vocab_size: int |
         if marker in name:
             return "attention.kv_write"
 
-    if name.startswith(("aten::linear", "aten::mm", "aten::addmm", "aten::matmul", "gemm")):
-        shape = linear_shape(event_args)
+    if any(m in name for m in LINEAR_MARKERS):
+        shape = linear_shape(name, event_args)
         if shape is not None:
             k, n = shape
             if vocab_size and n >= int(0.9 * vocab_size):
                 return "linear.lm_head"
             return LINEAR_SHAPES.get((k, n), f"linear[{k}x{n}]")
         return "linear"
+
+    if any(m in name for m in QUANT_MARKERS):
+        return "quant"
 
     if "norm" in name.lower():
         return "norm"

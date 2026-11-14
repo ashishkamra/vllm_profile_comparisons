@@ -1,0 +1,35 @@
+#!/bin/sh
+# Minimal `openssl` shim for torch inductor's cache hashing.
+#
+# This study host has openssl-libs but not the `openssl` CLI, and installing it
+# needs root. torch/_inductor/codecache.py::_precompile_header shells out to
+#     openssl sha512 <file>
+# purely to checksum a generated header; it takes the last whitespace-separated
+# token of stdout as the digest. So we emit just the digest, computed by
+# sha512sum, which is bit-identical.
+#
+# Anything other than the hashing invocation is a hard error: this shim exists
+# for one call site, and silently mis-handling a TLS operation would be worse
+# than failing.
+set -eu
+
+case "${1:-}" in
+  sha512)
+    shift
+    ;;
+  dgst)
+    shift
+    # tolerate `openssl dgst -sha512 <file>`
+    case "${1:-}" in
+      -sha512) shift ;;
+    esac
+    ;;
+  *)
+    echo "openssl shim: unsupported invocation: $*" >&2
+    echo "this shim only implements 'openssl sha512 <file>' for torch inductor" >&2
+    exit 2
+    ;;
+esac
+
+[ $# -eq 1 ] || { echo "openssl shim: expected exactly one file" >&2; exit 2; }
+sha512sum "$1" | cut -d' ' -f1

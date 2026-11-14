@@ -64,9 +64,12 @@ if command -v vllm >/dev/null 2>&1; then
   "$PY" - <<'PYEOF' 2>/dev/null || true
 import glob, os
 try:
-    import vllm._cpu_ops as ops
-    d = os.path.dirname(ops.__file__)
+    import torch, vllm
+    from vllm.platforms import current_platform
+    current_platform.import_kernels()
+    d = os.path.dirname(vllm.__file__)
     print("extension_variants=" + ",".join(sorted(os.path.basename(p) for p in glob.glob(os.path.join(d, "_C*.so")))))
+    print("dispatched_cpu_isa=" + ("avx512" if torch.cpu._is_avx512_supported() else "avx2"))
 except Exception as e:
     print("extension_variants=<unavailable:", e, ">")
 PYEOF
@@ -75,7 +78,7 @@ command -v vllm >/dev/null 2>&1 && vllm --version 2>/dev/null || true
 
 echo
 echo "=== cpu-leg thread and cache knobs ==="
-echo "OMP_NUM_THREADS=$OMP_NUM_THREADS"
+echo "OMP_NUM_THREADS=$OMP_NUM_THREADS (physical cores; override with VLLM_STUDY_OMP_THREADS)"
 echo "VLLM_CPU_OMP_THREADS_BIND=$VLLM_CPU_OMP_THREADS_BIND"
 echo "VLLM_CPU_KVCACHE_SPACE=${VLLM_CPU_KVCACHE_SPACE}GiB"
 

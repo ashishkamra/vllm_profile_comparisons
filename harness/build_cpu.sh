@@ -61,10 +61,20 @@ uv pip install --python "$PY" -e . --no-build-isolation --torch-backend=cpu
 
 echo "### verify"
 "$PY" -c "import vllm; print('vllm', vllm.__version__)"
+# v0.33 names the AVX-512/AMX variant "_C" and the AVX2 one "_C_AVX2", then picks
+# at import time in platforms/cpu.py. Importing vllm._C directly on a non-AVX512
+# host is an illegal instruction by design, so check the *dispatched* path.
 "$PY" - <<'PYEOF'
 import glob, os
-import vllm._cpu_ops as ops
-d = os.path.dirname(ops.__file__)
-print("compiled extension variants:", sorted(os.path.basename(p) for p in glob.glob(os.path.join(d, "_C*.so"))))
+import torch
+import vllm
+from vllm.platforms import current_platform
+
+current_platform.import_kernels()
+d = os.path.dirname(vllm.__file__)
+print("extension variants:", sorted(os.path.basename(p) for p in glob.glob(os.path.join(d, "_C*.so"))))
+print("avx512_supported:", torch.cpu._is_avx512_supported(),
+      "-> dispatches to", "_C" if torch.cpu._is_avx512_supported() else "_C_AVX2")
+print("cpu_attn op registered:", hasattr(torch.ops._C, "cpu_attention_with_kv_cache"))
 PYEOF
 "$PY" -c "from vllm.platforms import current_platform as p; print('platform', p.device_name, p.device_type)"

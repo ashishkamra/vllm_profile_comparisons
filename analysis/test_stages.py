@@ -57,9 +57,9 @@ def test_unknown_frame_is_other_never_guessed():
 
 def test_linear_shape_parsing():
     args = {"Input Dims": [[5, 1024], [6144, 1024]]}
-    assert stages.linear_shape(args) == (1024, 6144)
+    assert stages.linear_shape("aten::linear", args) == (1024, 6144)
     assert stages.op_class_for("aten::linear", args) == "linear.gate_up"
-    assert stages.linear_shape({"Input Dims": []}) is None
+    assert stages.linear_shape("aten::linear", {"Input Dims": []}) is None
 
 
 def test_lm_head_by_vocab_size_and_stage_promotion():
@@ -89,3 +89,38 @@ def test_elementwise_and_activation():
 
 def test_unknown_linear_shape_is_reported_not_merged():
     assert stages.op_class_for("aten::mm", {"Input Dims": [[4, 99], [77, 99]]}) == "linear[99x77]"
+
+
+def test_cpu_onednn_gemms_are_classified_by_shape():
+    # The CPU leg emits no aten::linear. These dims are copied from a real
+    # v0.33 CPU int8 trace (rank0): [out, input, scale, ..., weight_scale, ...].
+    qkv = {"Input Dims": [[64, 4096], [64, 1024], [64, 1], [], [1, 4096], [], []]}
+    assert stages.op_class_for("_C::onednn_scaled_mm", qkv) == "linear.qkv"
+
+    gate_up = {"Input Dims": [[64, 6144], [64, 1024], [64, 1], [], [1, 6144], [], []]}
+    assert stages.op_class_for("_C::onednn_scaled_mm", gate_up) == "linear.gate_up"
+
+    # lm_head arrives as an fp32 mm with the vocabulary as the output width
+    head = {"Input Dims": [[1, 151936], [1, 1024], [], []]}
+    assert (
+        stages.op_class_for("_C::onednn_mm", head, vocab_size=151936)
+        == "linear.lm_head"
+    )
+
+
+def test_aten_linear_uses_the_other_dims_layout():
+    # aten::linear is [input (..., K), weight (N, K)]
+    ev = {"Input Dims": [[8, 1024], [4096, 1024]]}
+    assert stages.op_class_for("aten::linear", ev) == "linear.qkv"
+
+
+def test_int8_quantization_is_its_own_class():
+    ev = {"Input Dims": [[64, 1024], [64, 1024], [64, 1], []]}
+    assert stages.op_class_for("_C::dynamic_scaled_int8_quant", ev) == "quant"
+
+
+def test_cpu_custom_ops_map_to_their_stage_ops():
+    assert stages.op_class_for("_C::cpu_attention_with_kv_cache", {}) == "attention.paged"
+    assert stages.op_class_for("_C::cpu_attn_reshape_and_cache", {}) == "attention.kv_write"
+    assert stages.op_class_for("_C::rotary_embedding", {}) == "rope"
+    assert stages.op_class_for("aten::silu", {}) == "activation"

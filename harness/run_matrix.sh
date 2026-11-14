@@ -12,6 +12,17 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 DEVICE=${DEVICE:?set DEVICE=cpu|gpu}
 
 "$R/harness/collect_env.sh" > "$R/results/env-$DEVICE-$(hostname).txt"
+if [ "$DEVICE" = "cpu" ]; then
+  # Record which instruction sets the leg actually executes (docs/02-methodology.md).
+  "$R/harness/probe_isa.sh" > "$R/results/isa-$DEVICE-$(hostname).txt"
+fi
+
+# A leftover server would silently answer for the previous variant, so refuse to
+# start a leg while the port is taken.
+if ss -lptnH "sport = :$PORT" 2>/dev/null | grep -q .; then
+  echo "port $PORT is already in use; stop the stale server before running a leg" >&2
+  exit 1
+fi
 
 for VARIANT in $(variants_for "$DEVICE"); do
   TAG="$DEVICE-$VARIANT"
@@ -47,10 +58,10 @@ for VARIANT in $(variants_for "$DEVICE"); do
     TRACES=("$R/traces/$TAG-$SCENARIO"/*.json.gz)
     shopt -u nullglob
     [ ${#TRACES[@]} -eq 0 ] && continue
-    "$PY" "$R/analysis/analyze_trace.py" --trace "${TRACES[@]}" \
+    "$ANALYSIS_PY" "$R/analysis/analyze_trace.py" --trace "${TRACES[@]}" \
       --out "$R/results/$TAG-$SCENARIO-stages.csv"
   done
 done
 
-"$PY" "$R/analysis/plot_compare.py" "$R"/results/*-stages.csv --out "$R/figures" || true
+"$ANALYSIS_PY" "$R/analysis/plot_compare.py" "$R"/results/*-stages.csv --out "$R/figures" || true
 echo "done. figures in $R/figures, metrics in $R/results"

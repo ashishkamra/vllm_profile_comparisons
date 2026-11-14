@@ -49,6 +49,27 @@ vocab 151936):
 | (3072, 1024) | `linear.down` | down projection |
 | (1024, 151936) | `linear.lm_head` | vocabulary projection (also promotes the stage to `model.lm_head`) |
 
+**The CPU leg emits no `aten::linear` at all.** vLLM dispatches the projection straight to
+its own kernels, and the recorded name is the dispatched op (`_C::onednn_mm`,
+`_C::onednn_scaled_mm`, `_C::sgl_gemm`, `cutlass_scaled_mm`, ...). Two dims conventions
+therefore exist in the same study, and the analyzer picks one from the op name rather than
+guessing:
+
+| family | `Input Dims[0]`, `Input Dims[1]` | (K, N) |
+|---|---|---|
+| `aten::linear`, `aten::mm`, `aten::addmm`, `aten::matmul` | `input (..., K)`, `weight (N, K)` | `dims[0][-1]`, `dims[1][0]` |
+| vLLM custom kernels (`onednn*`, `sgl_*`, `cutlass_*`) | `out (..., N)`, `input (..., K)` | `dims[1][-1]`, `dims[0][-1]` |
+
+Real int8 example from a `rank0` trace: a fused QKV GEMM records as
+`_C::onednn_scaled_mm` with
+`Input Dims = [[64, 4096], [64, 1024], [64, 1], [], [1, 4096], [], []]`, so
+`out = [64, 4096] -> N = 4096` and `input = [64, 1024] -> K = 1024`, hence `linear.qkv`.
+Getting this convention backwards silently relabels every projection, which is why it is
+pinned by tests in `analysis/test_stages.py` using dims copied from a real trace.
+
+`lm_head` arrives as `_C::onednn_mm` in fp32 (the head is not quantized in the W8A8
+artifact), so the vocab-size rule applies to the float path as well.
+
 Op classes that do not come from shapes:
 
 | op class | match |
@@ -58,9 +79,34 @@ Op classes that do not come from shapes:
 | `norm` | `aten::rms_norm`, `aten::layer_norm`, `*norm*` |
 | `rope` | `rotary`, `aten::rope`, `apply_rotary` |
 | `activation` | `aten::silu`, `aten::gelu`, `aten::sigmoid`, `silu_and_mul` |
-| `elementwise` | remaining `aten::` pointwise ops (`mul`, `add`, `sub`, `div`, `to`, `copy_`, …) |
+| `quant` | `dynamic_scaled_int8_quant`, `scaled_int8_quant`, `quantize_per_tensor`, `fp8_quant`, `_C::quant` |
+| `elementwise` | remaining `aten::` pointwise ops (`mul`, `add`, `sub`, `div`, `to`, `copy_`, ...) |
 | `sampler` | `argmax`, `softmax`, `topk`, `gumbel`, `multinomial` |
 | `python` | no ATen op under the frame: real Python overhead |
+
+`quant` is listed separately because it is the tax the deployment artifact pays for
+quantized weights: on the CPU INT8 leg it is ~1 % of attributed time over 2240 calls, and
+it would be invisible if it were folded into `elementwise`. It has no GPU-FP8 counterpart
+of the same name, so compare it as "quantization overhead", not op-for-op.
+
+## What counts as attributed time
+
+Only **work** is attributed:
+
+| trace | attributed events |
+|---|---|
+| CPU | `cpu_op` (ATen and vLLM custom ops) and `user_annotation` |
+| GPU | device `kernel`, `gpu_memcpy`, `gpu_memset`, correlated back to the launching op |
+
+Bare `python_function` *self* time is deliberately excluded. In a serving trace it is
+dominated by asyncio and queue waits: on an idle CPU int8 profile it is about 51 s of
+"self time" against 2.2 s of actual op time, so including it would turn every chart into a
+chart of waiting. The analyzer prints that total next to the attributed total so the
+omission stays visible, and `python` survives as an op class only for ops that have *no*
+ATen child, which is real interpreter overhead inside `model.forward` rather than idle time.
+
+A trace that contains no attributed events at all is skipped with an explanation: that
+shape means a frontend-only trace from a multiprocess profile run (see R9).
 
 ## Which time column
 

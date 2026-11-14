@@ -38,6 +38,11 @@ fi
 
 if [ -n "${PROFILE_DIR:-}" ]; then
   mkdir -p "$PROFILE_DIR"
+  # Single process for profiled runs. In multiprocess mode the engine core only
+  # forwards /start_profile to the worker, and the scheduler runs in a process
+  # that has no profiler at all: you get a frontend trace with no ATen ops and
+  # no engine stages. One process -> one trace -> the whole taxonomy.
+  export VLLM_ENABLE_V1_MULTIPROCESSING=0
   if [ "$DEVICE" = "gpu" ]; then ACT='["CPU","CUDA"]'; else ACT='["CPU"]'; fi
   # record_shapes is OFF by default at 0.33. Without it the analyzer cannot tell
   # qkv from o_proj from lm_head (docs/03-stage-taxonomy.md axis B), so the whole

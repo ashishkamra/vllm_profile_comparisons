@@ -53,22 +53,30 @@ comparison chart is not apples-to-oranges.
 
 ## Reproduce
 
+Two virtualenvs, on purpose: the server environment is vLLM's (built from source on the
+CPU leg) and the load generator is GuideLLM's. Their dependency pins fight each other, and
+the load generator is not part of what is being measured.
+
 ```bash
 # 0. prerequisites
-#    CPU leg: system headers for the source build (no CPU wheels exist)
+#    CPU leg: headers for the source build (no CPU wheels are published)
 #      Fedora/RHEL:      sudo dnf install -y numactl-devel
 #      Debian/Ubuntu:    sudo apt-get install -y libnuma-dev
-#    both legs:
-uv venv --python 3.12 .venv && source .venv/bin/activate
-uv pip install --torch-backend=cpu 'guidellm==0.8.1' matplotlib
+uv venv --python 3.12 .venv          # vLLM
+uv venv --python 3.12 .venv-loadgen  # GuideLLM + matplotlib
+uv pip install --python .venv-loadgen/bin/python --torch-backend=cpu \
+    'guidellm==0.8.1' matplotlib
 
 # 0a. self-test the analysis pipeline with no GPU, no model, no vLLM (seconds)
 analysis/demo.sh
 
-# 0b. environment (record it — the report embeds this)
-harness/collect_env.sh > results/env-$(hostname).txt
-#    The CPU leg must be built from source first (there are no CPU wheels):
-#      harness/build_cpu.sh     # ~30-45 min, -march=native, host-specific
+# 0b. build the CPU leg from source (~30-45 min, -march=native, host-specific)
+harness/build_cpu.sh
+
+# 0c. record what you are measuring with, then prove it
+harness/collect_env.sh   > results/env-$(hostname).txt
+harness/probe_isa.sh     > results/isa-$(hostname).txt   # CPU leg only
+DEVICE=cpu VARIANT=int8 harness/check_serve.sh           # boot + one completion + shut down
 
 # 1. serve the model; the device/variant pair is the only switch
 DEVICE=cpu VARIANT=int8 harness/serve.sh &
@@ -76,7 +84,7 @@ DEVICE=cpu VARIANT=int8 harness/serve.sh &
 # 2. load (three scenarios, identical on both legs)
 for s in sync conc8 sweep; do harness/run_scenario.sh $s cpu-int8; done
 
-# 3. profile one scenario (writes a trace, not a benchmark)
+# 3. profile one scenario (writes a trace, not a benchmark; see R9 in docs/02)
 DEVICE=cpu VARIANT=int8 harness/profile_scenario.sh conc8
 
 # ...or do the whole leg in one go
@@ -88,10 +96,17 @@ DEVICE=cpu harness/run_matrix.sh
 "$PY" analysis/plot_compare.py results/*-stages.csv --out figures/
 ```
 
+Profiled runs are single-process (`VLLM_ENABLE_V1_MULTIPROCESSING=0`) and bounded by engine
+iterations (`max_iterations=20`), because a multiprocess profile only records the idle
+frontend and an unbounded concurrent profile never finishes writing its trace. Throughput
+runs keep vLLM's defaults. See [R9](docs/02-methodology.md).
+
 ## Status
 
 - [x] Harness, stage taxonomy, analyzer, plot scaffolding
-- [ ] CPU leg: reference (fp32) + INT8 W8A8
+- [x] CPU extension built from source with native ISA flags, verified end to end
+      (fp32 and INT8 W8A8 both produce sane text; dispatched ISA and oneDNN kernel recorded)
+- [ ] CPU leg: reference (fp32) + INT8 W8A8 numbers
 - [ ] GPU leg: reference (bf16) + FP8 W8A8
 - [ ] Comparison figures
 

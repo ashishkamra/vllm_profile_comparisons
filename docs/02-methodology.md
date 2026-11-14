@@ -6,7 +6,7 @@ repo follows, and the threats that remain.
 ## Rules
 
 **R1 — Same vLLM commit, verified not assumed.**
-Both legs run `7833dce847` (`v0.34.0rc0`). `harness/collect_env.sh` records
+Both legs run `4ba787ec99` (`v0.33.0`). `harness/collect_env.sh` records
 `git rev-parse HEAD` and `vllm.__version__`; the report quotes them. The CPU leg *must*
 build from source (`VLLM_TARGET_DEVICE=cpu` — no CPU wheels are published); the GPU leg
 may use a precompiled wheel. Record which, per leg.
@@ -38,7 +38,8 @@ single source of truth for both legs. Token counts are *synthetic and exact*, so
 `--max-model-len 2048 --max-num-seqs 16` on both. GPU adds
 `--gpu-memory-utilization 0.85` (8 GB card); the CPU leg pins
 `VLLM_CPU_KVCACHE_SPACE=4` (GiB, vLLM's documented default) and
-`OMP_NUM_THREADS=$(nproc)` instead. Anything that changes scheduling behaviour must be
+`OMP_NUM_THREADS` = the host's **physical** core count (14 here, via `lscpu`,
+not `nproc`, which follows the affinity mask and can change between runs) instead. Anything that changes scheduling behaviour must be
 identical, or the traces measure different schedulers. Preemption counts are scraped
 around each run (`run_scenario.sh`): a non-zero delta marks the result invalid rather
 than letting a scheduler artefact be reported as a hardware difference.
@@ -64,6 +65,21 @@ whose runner differs from the other leg is not comparable.
 **R8 — Fixtures before interpretation.**
 Each scenario is run once warm (prefix cache warm, allocator warm) and then measured.
 `/reset_prefix_cache` between runs so run N is not accelerated by run N-1.
+
+**R9 — Profiled runs are single-process, and bounded by engine iterations.**
+Throughput runs keep vLLM's default multiprocessing. Profiled runs set
+`VLLM_ENABLE_V1_MULTIPROCESSING=0`, because in multiprocess mode `/start_profile` is only
+forwarded to the *worker*: the scheduler runs in a process that has no profiler at all, so
+the trace you get holds no ATen ops and no `engine.*` stages. One process means one trace
+containing scheduler, runner and model — which is the entire taxonomy.
+
+The profiler is also capped with `/start_profile {"max_iterations": N}` (default 20)
+rather than by wall clock. An unbounded concurrent profile writes a trace large enough
+that `/stop_profile` times out on the RPC and the trace is never flushed; capping by
+iterations makes the trace size independent of scenario duration and keeps the profiled
+window comparable across scenarios and variants. Both legs use the same cap, so op *counts*
+are comparable too (`112` linears per iteration on the CPU int8 leg, `2240` scaled_mm calls
+over 20 iterations).
 
 ## Threats to validity (stated, not hidden)
 
@@ -98,7 +114,21 @@ extension this host has (here `-march=alderlake`: AVX2, AVX-VNNI, GFNI, VAES, BM
 It is therefore only valid on the build host, and the numbers are a statement about *this*
 CPU. Two consequences: (a) do not ship that wheel anywhere else; (b) if the CPU leg is
 ever rebuilt on different hardware, the profile changes for reasons unrelated to vLLM.
-`results/env-*.txt` records the expansion.
+
+`harness/probe_isa.sh` records what actually runs rather than trusting the flags, because
+those are three different claims:
+
+| claim | evidence |
+|---|---|
+| the build emitted native instructions | `_C_AVX2.abi3.so` contains `shlx`/`sarx`/`rorx` (BMI2) and `vfmadd*` (FMA); a stock `-mavx2 -mf16c` build emits none of them |
+| vLLM dispatches to the AVX2 variant | `/proc/self/maps` shows `_C_AVX2.abi3.so` mapped and `_C.abi3.so` (the AVX-512/AMX variant, named `_C`) not; `torch.cpu._is_avx512_supported()` is `False` |
+| the int8 GEMM uses AVX-VNNI | oneDNN with `DNNL_VERBOSE=1` reports `isa:Intel AVX2 with Intel DL Boost` and picks `matmul,brg_matmul:avx2_vnni` for the s8×s8 GEMM |
+
+That last one matters most: on this host the int8 linear hot path is oneDNN (the faster
+`check_cpu_sgl_kernel` path needs AMX), and oneDNN selects its kernel from CPUID at
+runtime. Compiled-in VNNI would prove nothing on its own.
+`harness/collect_env.sh` records the flag expansion and `harness/probe_isa.sh` the runtime
+dispatch; both are redirected into `results/`.
 
 ### Host CPU on the GPU leg
 The 4060's host CPU does tokenization, scheduling, detokenization, and kernel launches.

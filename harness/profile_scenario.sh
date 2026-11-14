@@ -13,6 +13,7 @@ DEVICE=${DEVICE:?set DEVICE=cpu|gpu}
 VARIANT=${VARIANT:?set VARIANT=ref|int8|fp8}
 TAG="$DEVICE-$VARIANT"
 TRACE_DIR="$R/traces/$TAG-$SCENARIO"
+PROFILE_ITERS=${PROFILE_ITERS:-20}
 LOG="$R/results/$TAG-$SCENARIO.profile.log"
 
 mkdir -p "$R/results" "$TRACE_DIR"
@@ -41,8 +42,12 @@ for _ in 1 2 3; do
 done
 curl -sf -X POST "$TARGET/reset_prefix_cache" >/dev/null || true
 
-echo "+ start_profile" >&2
-curl -sf -X POST "$TARGET/start_profile" >/dev/null
+# Bound the trace by engine iterations, not wall clock. An unbounded concurrent
+# profile produces a trace so large that /stop_profile times out on the RPC and
+# the worker trace is never written.
+echo "+ start_profile (max_iterations=$PROFILE_ITERS)" >&2
+curl -sf -X POST "$TARGET/start_profile" -H 'Content-Type: application/json' \
+  -d "{\"max_iterations\": $PROFILE_ITERS}" >/dev/null
 
 EXTRA=$(scenario_args "$SCENARIO")
 GUIDELLM__DEFAULT_RESULTS_DIR="$R/results/$TAG-$SCENARIO" "$(guidellm_bin)" run \
@@ -51,9 +56,11 @@ GUIDELLM__DEFAULT_RESULTS_DIR="$R/results/$TAG-$SCENARIO" "$(guidellm_bin)" run 
   --data "$DATA_ARGS" \
   > "$R/results/$TAG-$SCENARIO.profile.console.txt" 2>&1
 
+# With max_iterations the profiler stops itself and writes the trace; this call
+# is then cheap and just finalises.
 echo "+ stop_profile" >&2
-curl -sf -X POST "$TARGET/stop_profile" >/dev/null
-sleep 2   # let the worker flush the trace
+curl -sf -X POST "$TARGET/stop_profile" >/dev/null || echo "WARN: stop_profile returned non-2xx" >&2
+sleep 5   # let the trace handler finish writing to disk
 
 kill -TERM $SERVER_PID 2>/dev/null || true
 wait $SERVER_PID 2>/dev/null || true

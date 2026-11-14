@@ -1,8 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """Aggregate a torch/kineto trace into the stage taxonomy of docs/03-stage-taxonomy.md.
 
-Works on CPU traces today; GPU traces are handled by correlating kernels back to the
-CPU op that launched them (see docs/02-methodology.md#async-device-time).
+Two axes per event, as defined in that document:
+
+  stage     which vLLM stage owns the work (from the enclosing Python frame)
+  op_class  what kind of math it is (from the ATen op name + input shapes)
+
+Only *work* is attributed: `cpu_op` / user annotations on CPU, device kernels on
+GPU. Bare `python_function` self time is deliberately excluded — in a serving
+trace it is dominated by asyncio/queue waits, which would drown out the model.
+Its share is printed separately so the omission is visible, not hidden.
 
 Usage:
     analyze_trace.py --trace traces/cpu-int8-conc8/*.json.gz --out results/cpu-int8-conc8.csv
@@ -11,7 +18,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import bisect
 import collections
 import gzip
 import json
@@ -21,15 +27,17 @@ import sys
 import stages
 
 FRAME_CAT = "python_function"
+# Host-side work on both legs: ATen ops and explicit annotations.
+CPU_WORK_CATS = {"cpu_op", "user_annotation"}
 KERNEL_CATS = {"kernel", "gpu_memcpy", "gpu_memset"}
+LAUNCHER_CATS = ("cuda_runtime", "Runtime", "gpu_user_annotation")
 
 
 def load(path: str) -> list[dict]:
     opener = gzip.open if path.endswith(".gz") else open
     with opener(path, "rt") as f:
         raw = json.load(f)
-    events = raw["traceEvents"] if isinstance(raw, dict) else raw
-    return events
+    return raw["traceEvents"] if isinstance(raw, dict) else raw
 
 
 def complete_events(events: list[dict]) -> list[dict]:
@@ -63,11 +71,16 @@ def self_times(events: list[dict]) -> dict[int, float]:
     return result
 
 
-class FrameIndex:
-    """Innermost-enclosing python frame lookup, per thread."""
+class StageIndex:
+    """Maps (thread, timestamp) -> engine stage, via a per-thread sweep.
+
+    Python frames are properly nested per thread, so one pass with a stack gives
+    the innermost enclosing frame for every query. Querying ops in timestamp
+    order makes the whole thing O((frames + ops) log n) instead of a backward
+    scan per event.
+    """
 
     def __init__(self, events: list[dict]):
-        self._ts: dict[object, list[float]] = collections.defaultdict(list)
         self._frames: dict[object, list[tuple[float, float, str, str]]] = (
             collections.defaultdict(list)
         )
@@ -75,24 +88,33 @@ class FrameIndex:
             if e.get("cat") != FRAME_CAT:
                 continue
             file, func = stages.parse_frame(e.get("name", ""))
-            tid = e.get("tid")
-            self._frames[tid].append((e["ts"], e["ts"] + e["dur"], file, func))
-        for tid in self._frames:
-            self._frames[tid].sort()
-            self._ts[tid] = [f[0] for f in self._frames[tid]]
+            self._frames[e.get("tid")].append(
+                (e["ts"], e["ts"] + e["dur"], file, func)
+            )
+        for frames in self._frames.values():
+            frames.sort(key=lambda f: f[0])
+        self._cursor: dict[object, int] = collections.defaultdict(int)
+        self._stack: dict[object, list[tuple[float, str]]] = collections.defaultdict(list)
 
     def stage_at(self, tid, ts: float) -> str:
         frames = self._frames.get(tid)
         if not frames:
             return "other"
-        i = bisect.bisect_right(self._ts[tid], ts) - 1
-        while i >= 0:
+
+        stack = self._stack[tid]
+        i = self._cursor[tid]
+        while i < len(frames) and frames[i][0] <= ts:
             start, end, file, func = frames[i]
-            if end >= ts:
-                stage = stages.stage_for_frame(file, func)
-                if stage != "other":
-                    return stage
-            i -= 1
+            stack.append((end, stages.stage_for_frame(file, func)))
+            i += 1
+        self._cursor[tid] = i
+
+        while stack and stack[-1][0] < ts:
+            stack.pop()
+
+        for _end, stage in reversed(stack):
+            if stage != "other":
+                return stage
         return "other"
 
 
@@ -100,7 +122,7 @@ def kernel_to_launcher(events: list[dict]) -> dict[int, dict]:
     """Map kernel event id -> the CPU runtime event that launched it (GPU traces)."""
     launchers: dict[str, dict] = {}
     for e in events:
-        if e.get("cat") in ("cuda_runtime", "Runtime", "gpu_user_annotation"):
+        if e.get("cat") in LAUNCHER_CATS:
             corr = e.get("args", {}).get("correlation")
             if corr is not None:
                 launchers[str(corr)] = e
@@ -115,6 +137,16 @@ def kernel_to_launcher(events: list[dict]) -> dict[int, dict]:
 
 def kind_of_trace(events: list[dict]) -> str:
     return "gpu" if any(e.get("cat") in KERNEL_CATS for e in events) else "cpu"
+
+
+def work_events(events: list[dict], kind: str) -> list[dict]:
+    """The events whose self time is attributed, in timestamp order per thread."""
+    if kind == "gpu":
+        picked = [e for e in events if e.get("cat") in KERNEL_CATS]
+    else:
+        picked = [e for e in events if e.get("cat") in CPU_WORK_CATS]
+    picked.sort(key=lambda e: (e.get("tid"), e["ts"]))
+    return picked
 
 
 def main() -> int:
@@ -132,33 +164,34 @@ def main() -> int:
             print(f"skip {path}: no complete events", file=sys.stderr)
             continue
 
-        st = self_times(events)
-        frames = FrameIndex(events)
         kind = kind_of_trace(events)
-        launcher = kernel_to_launcher(events) if kind == "gpu" else {}
+        work = work_events(events, kind)
+        if not work:
+            print(
+                f"skip {path}: no {'kernels' if kind == 'gpu' else 'ATen ops'} — "
+                "this looks like a frontend-only trace; profile with "
+                "VLLM_ENABLE_V1_MULTIPROCESSING=0",
+                file=sys.stderr,
+            )
+            continue
 
+        st = self_times(events)
+        index = StageIndex(events)
+        launcher = kernel_to_launcher(events) if kind == "gpu" else {}
         metric = "device_ms" if kind == "gpu" else "self_ms"
-        width = (max(e["_end"] for e in events) - min(e["ts"] for e in events)) / 1000.0
 
         # (stage, op_class) -> [ms, calls]
         agg: dict[tuple[str, str], list[float]] = collections.defaultdict(lambda: [0.0, 0])
         by_op: collections.Counter = collections.Counter()
 
-        for e in events:
+        for e in work:
             if kind == "gpu":
-                if e.get("cat") not in KERNEL_CATS:
-                    continue  # host spans are reported separately below
                 host = launcher.get(id(e), e)
                 tid, ts = host.get("tid"), host.get("ts", e["ts"])
             else:
-                if e.get("cat") == FRAME_CAT:
-                    tid, ts = e.get("tid"), e["ts"]
-                elif e.get("cat") in ("cpu_op", "user_annotation"):
-                    tid, ts = e.get("tid"), e["ts"]
-                else:
-                    continue
+                tid, ts = e.get("tid"), e["ts"]
 
-            stage = frames.stage_at(tid, ts)
+            stage = index.stage_at(tid, ts)
             op_class = stages.op_class_for(
                 e.get("name", ""), e.get("args"), vocab_size=args.vocab_size
             )
@@ -169,8 +202,16 @@ def main() -> int:
             by_op[e.get("name", "")] += ms
 
         total = sum(v[0] for v in agg.values()) or 1.0
-        print(f"\n=== {os.path.basename(path)}  [{kind} trace, metric={metric}, "
-              f"window={width:.1f} ms] ===")
+
+        # Idle/wait context: python self time is not attributed, but its size
+        # explains how much of the trace window is not "work" on this thread.
+        python_self = sum(
+            st.get(id(e), 0.0) for e in events if e.get("cat") == FRAME_CAT
+        ) / 1000.0
+
+        print(f"\n=== {os.path.basename(path)}  [{kind} trace, metric={metric}] ===")
+        print(f"  work events: {len(work)}   attributed: {total:.1f} ms   "
+              f"python self time (not attributed): {python_self:.1f} ms")
 
         stage_totals = collections.Counter()
         for (stage, _), (ms, _n) in agg.items():
@@ -191,7 +232,8 @@ def main() -> int:
         for (stage, op_class), (ms, n) in sorted(
             agg.items(), key=lambda kv: -kv[1][0]
         )[: args.top]:
-            print(f"  {ms:9.2f} ms {100 * ms / total:5.1f}%  {stage:22s} {op_class:16s} n={n}")
+            print(f"  {ms:9.2f} ms {100 * ms / total:5.1f}%  "
+                  f"{stage:22s} {op_class:16s} n={n}")
 
         for (stage, op_class), (ms, n) in agg.items():
             out_rows.append(
