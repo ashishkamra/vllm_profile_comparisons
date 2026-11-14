@@ -83,6 +83,9 @@ analysis/demo.sh
 
 # 0b. build the CPU leg from source (~30-45 min, -march=native, host-specific)
 harness/build_cpu.sh
+#     GPU leg instead installs the same pin as a wheel into .venv, which is why
+#     harness/env.sh looks in both places:
+#       uv pip install --python .venv/bin/python 'vllm==0.33.0'
 
 # 0c. record what you are measuring with, then prove it
 harness/collect_env.sh   > results/env-cpu-$(hostname).txt
@@ -118,6 +121,51 @@ did the time go overall" but "what was in this step and what was the scheduler's
 (see [`docs/04-request-lifecycle.md`](docs/04-request-lifecycle.md)). It reads the worker's
 own `execute_context_*(...)_generation_*(...)` annotations, so it only works on engine-core
 trace files (`rank0*`), not on the frontend one.
+
+### GPU startup troubleshooting
+
+The GPU leg needs a host compiler that the installed CUDA toolkit accepts, and
+the failure is easy to misread: vLLM starts, loads the model, compiles, and only
+then dies in FlashInfer's JIT step, because FlashInfer builds its sampling kernel
+at first use even when vLLM itself came from a wheel.
+
+```
+flashinfer.jit: Building JIT module sampling
+/usr/local/cuda-13.3/include/crt/host_config.h:137:2: error:
+    #error -- unsupported GNU version! gcc versions later than 15 are not supported!
+```
+
+CUDA 13.3 accepts GCC ≤ 15; a rolling distribution that already ships GCC 16
+(e.g. Fedora 44) therefore has no usable system compiler. Get a GCC 15 without
+root and point the build at it:
+
+```bash
+conda create -y -p ~/.local/conda-gcc15 --override-channels -c conda-forge \
+    gxx_linux-64=15
+GCC15=~/.local/conda-gcc15/bin
+CC=$GCC15/x86_64-conda-linux-gnu-gcc \
+CXX=$GCC15/x86_64-conda-linux-gnu-g++ \
+  DEVICE=gpu VARIANT=fp8 harness/check_serve.sh
+```
+
+Both variables are required: FlashInfer passes `CC` to `nvcc -ccbin` for `.cu`
+files and compiles the C++ binding with `CXX`, so setting only one leaves half
+the build on the wrong compiler. Do not use `--allow-unsupported-compiler` for
+study runs.
+
+To keep the setting for every later run on that host, put it in the untracked
+`harness/env.local.sh`, which `harness/env.sh` sources last:
+
+```bash
+GCC15=$HOME/.local/conda-gcc15/bin
+export CC=$GCC15/x86_64-conda-linux-gnu-gcc
+export CXX=$GCC15/x86_64-conda-linux-gnu-g++
+```
+
+Startup also reads as a hang: a first launch spends several minutes downloading
+weights and compiling kernels before it opens the HTTP port, so raise the limit
+with `SERVE_CHECK_TIMEOUT=1200`. `check_serve.sh` names its log file, and on an
+early exit prints the log tail, so a dead server never looks like a timeout.
 
 Profiled runs are single-process (`VLLM_ENABLE_V1_MULTIPROCESSING=0`) and bounded by engine
 iterations (`max_iterations=20`), because a multiprocess profile only records the idle

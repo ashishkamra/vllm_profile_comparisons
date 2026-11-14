@@ -24,3 +24,6 @@ results/*.profile.console.txt
 
 # load-generator venv (guidellm + matplotlib)
 .venv-loadgen/
+
+# host-local harness overrides (e.g. the CUDA host compiler); see harness/env.sh
+harness/env.local.sh

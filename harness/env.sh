@@ -9,8 +9,22 @@ export R
 # Never rely on PATH: a stale vllm in user site-packages would silently win and
 # the study would measure a different version than the pin says.
 export VLLM_SRC=${VLLM_SRC:-$HOME/workspace/vllm}
-export PY=${PY:-$VLLM_SRC/.venv/bin/python}
-[ -x "$PY" ] || PY=$(command -v python3 || echo python)
+# The two legs get vLLM from two different places: the CPU leg builds it from
+# source into $VLLM_SRC/.venv, the GPU leg installs the pinned wheel straight
+# into this repo, at $R/.venv. Try both before the last-resort system python,
+# which has no vLLM at all -- on a host without $VLLM_SRC that fallback is what
+# used to happen, and it only failed minutes into startup.
+if [ -z "${PY:-}" ]; then
+  if [ -x "$VLLM_SRC/.venv/bin/python" ]; then
+    PY=$VLLM_SRC/.venv/bin/python
+  elif [ -x "$R/.venv/bin/python" ]; then
+    PY=$R/.venv/bin/python
+  else
+    PY=$(command -v python3 || echo python)
+    echo "env.sh: warning: no study venv found ($VLLM_SRC/.venv, $R/.venv);" \
+         "falling back to $PY, which is probably not the pinned vLLM" >&2
+  fi
+fi
 export PY
 
 vllm_cli() { "$PY" -m vllm.entrypoints.cli.main "$@"; }
@@ -134,3 +148,12 @@ backend_args() {  # backend_args <device> <variant>
 #   SCENARIOS="sync conc8 sweep" SWEEP_SECONDS=180 harness/run_matrix.sh
 SCENARIOS=${SCENARIOS:-"sync conc8"}
 DATA_ARGS=${DATA_ARGS:-"kind=synthetic_text,prompt_tokens=512,output_tokens=128"}
+
+# --- host-local overrides ----------------------------------------------------
+# Machine-specific, not part of the study definition and therefore not tracked:
+# the CUDA host compiler is the usual example (see README, "GPU startup
+# troubleshooting"). Sourced last so it can adjust anything set above, and absent
+# on hosts that need nothing.
+if [ -f "$R/harness/env.local.sh" ]; then
+  . "$R/harness/env.local.sh"
+fi
