@@ -203,4 +203,6 @@ offline/    earlier offline `LLM(...)` scripts (superseded by the server harness
 data/       prompt padding used to control prefill length
 results/    committed metrics (JSON/CSV), never traces
 figures/    committed charts
+SESSION-TRANSCRIPT.md   the conversation that produced all of the above, readable
+SESSION-EXPORT.json     ...and the same conversation in raw `opencode session export` form
 ```
