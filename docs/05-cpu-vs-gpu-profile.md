@@ -172,6 +172,12 @@ time-to-first-token rather than steady-state throughput.
   request 0's 19th decode step; the remaining three requests are served but not
   recorded. That is sufficient for the per-step anatomy, which repeats layer for
   layer, but it is not a throughput sample.
+- **The first request after `start_profile` is not representative.** It takes
+  14.2 s on the GPU and 34.8 s on the CPU, against ~1.39 s and ~18 s for the
+  next three requests of identical shape. That gap is profiler startup (kineto
+  initialization and frame symbolization), and it lands *outside* the annotated
+  steps, which is why the trace shows normal per-step times. Do not read
+  `results/*-profile.requests.json` as a latency measurement.
 - **The 32-token prefix-cache trap.** The harness warms up with a short request
   and resets the prefix cache. On the GPU the reset did not take effect and the
   profiled prefill scheduled 480 tokens instead of 512 — two 16-token blocks came
