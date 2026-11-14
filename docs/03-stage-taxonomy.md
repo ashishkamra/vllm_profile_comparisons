@@ -77,6 +77,11 @@ Op classes that do not come from shapes:
 | `attention.paged` | kernel/op name contains `cpu_attention_with_kv_cache`, `paged_attention`, `flash_fwd`, `_efficient_attention`, `triton_attention` |
 | `attention.kv_write` | `cpu_attn_reshape_and_cache`, `reshape_and_cache`, `cache_kernels` |
 | `norm` | `aten::rms_norm`, `aten::layer_norm`, `*norm*` |
+
+`norm` only appears when the kernel exists as an op. On x86 CPU vLLM decomposes RMSNorm
+into `aten::pow/mul/mean/div_`, so name-based classification lands it in `elementwise`;
+`analysis/step_report.py` attributes ops by their enclosing `nn.Module` frame instead and
+recovers a `norm` row. See `docs/04-request-lifecycle.md`.
 | `rope` | `rotary`, `aten::rope`, `apply_rotary` |
 | `activation` | `aten::silu`, `aten::gelu`, `aten::sigmoid`, `silu_and_mul` |
 | `quant` | `dynamic_scaled_int8_quant`, `scaled_int8_quant`, `quantize_per_tensor`, `fp8_quant`, `_C::quant` |

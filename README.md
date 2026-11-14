@@ -108,8 +108,16 @@ PY=.venv-loadgen/bin/python        # analysis needs matplotlib; vLLM's venv does
 "$PY" analysis/analyze_trace.py --trace traces/cpu-int8-conc8/*.json.gz \
        --out results/cpu-int8-conc8-stages.csv
 "$PY" analysis/plot_compare.py results/*-stages.csv --out figures/
+"$PY" analysis/step_report.py --trace "traces/cpu-int8-conc8/rank0*.json.gz" \
+       --fig figures/fig4-step-anatomy.png
 "$PY" harness/summarize.py --results results --out results/summary.csv
 ```
+
+`analysis/step_report.py` is the second question down from `analyze_trace.py`: not "where
+did the time go overall" but "what was in this step and what was the scheduler's batch"
+(see [`docs/04-request-lifecycle.md`](docs/04-request-lifecycle.md)). It reads the worker's
+own `execute_context_*(...)_generation_*(...)` annotations, so it only works on engine-core
+trace files (`rank0*`), not on the frontend one.
 
 Profiled runs are single-process (`VLLM_ENABLE_V1_MULTIPROCESSING=0`) and bounded by engine
 iterations (`max_iterations=20`), because a multiprocess profile only records the idle
@@ -160,8 +168,14 @@ are being measured the same way).
 
 Figures: [`figures/fig1-stages.png`](figures/fig1-stages.png),
 [`fig2-op-classes.png`](figures/fig2-op-classes.png),
-[`fig3-linear.png`](figures/fig3-linear.png). Numbers:
+[`fig3-linear.png`](figures/fig3-linear.png),
+[`fig4-step-anatomy.png`](figures/fig4-step-anatomy.png) (per-layer anatomy of one
+prefill and one decode step). Numbers:
 [`results/summary.csv`](results/summary.csv), `results/*-stages.csv`.
+
+For what a *single step* is made of — the scheduler's own batch decision, the phase split,
+the per-layer anatomy, and why the scenario ITL is larger than any decoded step — see
+[`docs/04-request-lifecycle.md`](docs/04-request-lifecycle.md).
 
 GPU leg: not yet run (no GPU on the CPU-side host). The command sequence is the same
 with `DEVICE=gpu`.
@@ -181,7 +195,7 @@ Numbers land in `results/` (JSON/CSV only — raw traces are gitignored, see
 ## Layout
 
 ```
-docs/       architecture primer, methodology, stage taxonomy
+docs/       architecture primer, methodology, stage taxonomy, step-by-step anatomy
 harness/    environment capture, server launch, GuideLLM scenarios, profiling
 analysis/   trace -> normalized stages + comparison plots
 offline/    earlier offline `LLM(...)` scripts (superseded by the server harness,

@@ -122,8 +122,10 @@ is where the INT8 GEMM actually lands (VNNI, not AMX).
 Decode produces one token per sequence but must still project a hidden state to the full
 vocabulary through `lm_head` each step: 151936 × 1024. For a 0.6B model that matmul is a
 *large* fraction of decode time — on both devices, for different reasons (GPU: it is a
-skinny GEMM that cannot fill the machine; CPU: it is simply a lot of FLOPs). Expect
-`linear.lm_head` to be visible in the profile. If it is not, be suspicious of the trace.
+skinny GEMM that cannot fill the machine; CPU: it is a 622 MB fp32 weight read per step, so
+it is bandwidth-bound and costs the same for 8 rows as for 512 — measured in
+`docs/04-request-lifecycle.md`). Expect `linear.lm_head` to be visible in the profile. If
+it is not, be suspicious of the trace.
 
 The fused projections also give the shape key the analyzer uses to name sub-stages
 without patching the model:
