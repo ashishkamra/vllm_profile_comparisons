@@ -32,8 +32,10 @@ would scatter both. One-dimensional `nn.Module` frames (Qwen3Attention, Qwen2MLP
 carry the scope needed to tell o_proj's RowParallelLinear from MLP down's.
 
 Layer 0 is reported separately rather than dropped: on the first decode step it
-absorbs one-time per-shape oneDNN setup, so it is 1.9x the other layers there and
-only 1.1x by the end of the window. The means use layers 1..N-1.
+absorbs a one-time per-shape setup (on CPU the oneDNN primitive for the new M,
+on GPU the first launch of kernels for these shapes), so it is several times the
+other layers there and close to them by the end of the window. The means use
+layers 1..N-1.
 
 Works on CPU and GPU traces. On CPU the metric is host self time; on GPU the
 per-op numbers are device (kernel) time attributed through the launching op, so
@@ -110,6 +112,7 @@ GROUPS = {
     "mlp.gate_up": ("linear.gate_up",),
     "mlp.act": ("activation",),
     "mlp.down": ("linear.down",),
+    "lm_head": ("linear.lm_head",),
     "norm": ("norm",),
 }
 
@@ -152,19 +155,39 @@ def layer_frames(events: list[dict], lo: float, hi: float, pattern: re.Pattern) 
     return [best[i] for i in sorted(best)]
 
 
-def work_items(events: list[dict], kind: str, self_ms: dict[int, float]) -> list[tuple]:
-    """(host event, ms, name, args) for attributed work.
+def work_items(
+    events: list[dict], kind: str, self_ms: dict[int, float], vocab_size: int = 151936
+) -> list[tuple]:
+    """(host event, ms, name, args, op_class) for attributed work.
 
     The host event is the one to test for containment: the op itself on CPU, the
     *launching* op on GPU, because a kernel's timestamp is on the device clock
     and does not fall inside the Python frame that requested it.
+
+    The class is resolved here, not at attribution time, because on GPU the
+    kernel name alone is coarse ("a gemm") and the enclosing op is what says
+    which projection it is. Kernels launched through vLLM's compile wrapper skip
+    nn.Module.__call__, so they carry no module frame at all; without this they
+    fall back to a bare "linear" component (35.8% of prefill in one trace).
     """
     launcher = at.kernel_to_launcher(events) if kind == "gpu" else {}
+    enclosing = at.EnclosingOps(events) if kind == "gpu" else None
     items = []
     for e in at.work_events(events, kind):
         host = launcher.get(id(e), e)
+        if kind == "gpu":
+            op_class = at.gpu_op_class(
+                e,
+                enclosing.op_at(host.get("tid"), host.get("ts", e["ts"])),
+                vocab_size=vocab_size,
+            )
+        else:
+            op_class = stages.op_class_for(
+                e.get("name", ""), e.get("args"), vocab_size=vocab_size
+            )
         items.append(
-            (host, self_ms.get(id(e), e["dur"]) / 1000.0, e.get("name", ""), e.get("args"))
+            (host, self_ms.get(id(e), e["dur"]) / 1000.0, e.get("name", ""),
+             e.get("args"), op_class)
         )
     return items
 
@@ -232,7 +255,6 @@ def attribute_layers(
     win: list[dict],
     resolve,
     items: list[tuple],
-    vocab_size: int,
 ) -> list[tuple[float, collections.Counter]]:
     """[(layer ms, {component: ms})] for the given layer frames."""
     idx_of = {id(e): i for i, e in enumerate(win)}
@@ -240,10 +262,9 @@ def attribute_layers(
     for layer in layers:
         lo, hi = layer["ts"], layer["ts"] + layer["dur"]
         agg: collections.Counter = collections.Counter()
-        for host, ms, name, args in items:
+        for host, ms, name, args, op_class in items:
             if not (lo <= host["ts"] <= hi):
                 continue
-            op_class = stages.op_class_for(name, args, vocab_size=vocab_size)
             comp = None
             if op_class == "quant":
                 comp = "quant"
@@ -267,7 +288,7 @@ def layer_profile(events, annotation, items, args) -> dict | None:
                           re.compile(args.layer_regex))
     if len(layers) < 2:
         return None
-    per_layer = attribute_layers(layers, win, label_resolver(win, parent), items, args.vocab_size)
+    per_layer = attribute_layers(layers, win, label_resolver(win, parent), items)
     return {
         "n_layers": len(per_layer),
         "layer_ms": [t for t, _ in per_layer],
@@ -341,7 +362,7 @@ def report(path: str, args) -> dict | None:
 
     # --- per-layer anatomy of one prefill step and one decode step -----------
     self_ms = at.self_times(events)
-    items = work_items(events, kind, self_ms)
+    items = work_items(events, kind, self_ms, args.vocab_size)
     prefill = next((r for r in rows if r["cq"] and not r["gq"] and r["tokens"] > 1), None)
     decodes = [r for r in rows if not r["cq"] and r["gq"]]
     decode = decodes[0] if decodes else None
@@ -357,10 +378,11 @@ def report(path: str, args) -> dict | None:
     print("\n-- per-layer anatomy --")
     print(f"  {'component':13s} {'decode ms':>10s} {'%':>6s} {'prefill ms':>11s} {'%':>6s}")
     means = {lab: mean_components(p) for lab, p in profile["layers"].items()}
-    totals = {
-        lab: sum(p["layer_ms"][1:]) / (p["n_layers"] - 1)
-        for lab, p in profile["layers"].items()
-    }
+    # Denominator: the attributed total, not the layer frame. On CPU the two are
+    # the same (unattributed fills the gap), but on a GPU the device work queued
+    # inside a layer can outlast the host span that launched it -- so dividing
+    # device ms by host ms during prefill gave percentages summing past 100.
+    totals = {lab: sum(m.values()) for lab, m in means.items()}
     keys = [k for k in COMPONENT_ORDER if any(k in m for m in means.values())]
     keys += sorted({k for m in means.values() for k in m} - set(keys))
     for k in keys:
@@ -409,17 +431,23 @@ def report(path: str, args) -> dict | None:
         if len(decodes) > 1:
             last = layer_profile(events, steps[decodes[-1]["step"]], items, args)
             if last and len(last["layer_ms"]) > 1:
+                ratio = last["layer_ms"][0] / last["layer_ms"][1]
                 print(
                     f"           by step {decodes[-1]['step']}: {last['layer_ms'][0]:.2f} ms vs "
                     f"{last['layer_ms'][1]:.2f} ms for L1 "
-                    f"({last['layer_ms'][0] / last['layer_ms'][1]:.2f}x) -- penalty decayed"
+                    f"({ratio:.2f}x) -- "
+                    + ("back to baseline" if ratio < 1.15 else "penalty still decaying")
                 )
+        why = (
+            "oneDNN builds a primitive for the new M"
+            if kind == "cpu"
+            else "first launch of these shapes on the device"
+        )
         print(
-            "           -> the first decode step lazily builds the oneDNN primitive for the "
-            "new M=8 shape;\n"
-            "              L0 absorbs it and every GEMM in it runs ~4x slow once. It does not "
-            "recur, so\n"
-            "              the means above exclude L0 and report it here instead."
+            "           -> one-time per-shape setup on the first step at the new shape "
+            f"({why}).\n"
+            "              It does not recur, so the means above exclude L0 and report "
+            "it here instead."
         )
 
     # --- what the scheduler decided -----------------------------------------
