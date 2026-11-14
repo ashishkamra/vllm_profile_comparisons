@@ -76,8 +76,11 @@ for _ in $(seq 1 300); do
 done
 
 # Warm up outside the traced window: allocator, prefix cache, lazily-imported code.
+# The preamble makes this text different from the first token on, so even if the
+# reset below does not take effect the timed prompt cannot hit its cache blocks.
 "$PY" "$R/harness/drive_requests.py" --target "$TARGET" --model "$MODEL" \
-  --requests 1 --max-tokens 8 --prompt-tokens 32 >/dev/null
+  --requests 1 --max-tokens 8 --prompt-tokens 32 \
+  --preamble "Warmup request; distinct prefix, not part of the measured prompt. " >/dev/null
 curl -sf -X POST "$TARGET/reset_prefix_cache" >/dev/null || true
 
 echo "+ start_profile (max_iterations=$PROFILE_ITERS)" >&2
@@ -107,3 +110,30 @@ if ! ls "$TRACE_DIR"/rank0*.pt.trace.json* >/dev/null 2>&1; then
   echo "no engine-core trace (rank0*) was written -- check $LOG" >&2
   exit 1
 fi
+
+# What the scheduler actually scheduled, read from its own annotation. A prefix
+# cache hit or a chunked prefill shows up here as a number below the prompt
+# size; without this check it only surfaced later, as a puzzling 480 in the
+# analysis of a 512-token request.
+"$PY" - "$TRACE_DIR" "$PROFILE_PROMPT_TOKENS" <<'PY'
+import glob, gzip, json, re, sys
+trace_dir, want = sys.argv[1], int(sys.argv[2])
+step = re.compile(r"execute_context_(\d+)\((\d+)\)_generation_(\d+)\((\d+)\)")
+path = sorted(glob.glob(f"{trace_dir}/rank0*.json.gz"))[0]
+with gzip.open(path, "rt") as f:
+    raw = json.load(f)
+events = raw["traceEvents"] if isinstance(raw, dict) else raw
+ann = sorted(
+    (e for e in events if e.get("cat") == "user_annotation" and step.match(e.get("name", ""))),
+    key=lambda e: e["ts"],
+)
+if not ann:
+    print("prefill step: no execute_context_* annotation found", file=sys.stderr)
+    sys.exit(0)
+ctx = int(step.match(ann[0]["name"]).group(2))
+print(f"prefill step: {ctx} context tokens (prompt asked for {want})")
+if ctx != want:
+    print(f"WARN: {want - ctx} prompt tokens were not scheduled as context "
+          "(prefix-cache hit or chunked prefill); the legs are not identical",
+          file=sys.stderr)
+PY

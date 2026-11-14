@@ -45,15 +45,24 @@ def post(target: str, path: str, body: dict, timeout: float) -> dict:
         return json.load(resp)
 
 
-def build_prompt(target: str, model: str, prompt_tokens: int, timeout: float) -> tuple[str, int]:
+def build_prompt(
+    target: str, model: str, prompt_tokens: int, timeout: float, preamble: str = ""
+) -> tuple[str, int]:
     """Return (text, token count).
 
     The count is measured with the server's own tokenizer rather than estimated,
     so the prefill size in the trace can be checked against what was asked for
     instead of assumed. When the text overshoots, it is trimmed through the
     server's tokenizer so both legs prefill the same number of tokens.
+
+    `preamble` exists for the warmup request: it changes the text from the very
+    first token, so the warmup cannot be a cached prefix of the study prompt.
+    Without it a 32-token warmup shares its first two blocks with the 512-token
+    prompt, and if /reset_prefix_cache does not take effect (it is best-effort
+    in profile_run.sh) the profiled prefill silently schedules 480 tokens
+    instead of 512 -- which is exactly what happened on the GPU leg.
     """
-    text = FILLER * (prompt_tokens // 8 + 8)
+    text = preamble + FILLER * (prompt_tokens // 8 + 8)
     ids = post(target, "/tokenize", {"model": model, "prompt": text}, timeout)["tokens"]
 
     if len(ids) > prompt_tokens:
@@ -71,11 +80,19 @@ def main() -> int:
     ap.add_argument("--requests", type=int, default=4)
     ap.add_argument("--max-tokens", type=int, default=128)
     ap.add_argument("--prompt-tokens", type=int, default=512)
+    ap.add_argument(
+        "--preamble",
+        default="",
+        help="text placed before the filler; the warmup uses a unique one so its "
+        "tokens can never be a cached prefix of the timed prompt",
+    )
     ap.add_argument("--timeout", type=float, default=600.0)
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    prompt, prompt_len = build_prompt(args.target, args.model, args.prompt_tokens, args.timeout)
+    prompt, prompt_len = build_prompt(
+        args.target, args.model, args.prompt_tokens, args.timeout, args.preamble
+    )
     print(f"prompt: {prompt_len} tokens (asked for {args.prompt_tokens}); "
           f"{args.requests} requests, {args.max_tokens} tokens each, serial")
 
