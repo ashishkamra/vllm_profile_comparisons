@@ -30,7 +30,19 @@ FRAME_CAT = "python_function"
 # Host-side work on both legs: ATen ops and explicit annotations.
 CPU_WORK_CATS = {"cpu_op", "user_annotation"}
 KERNEL_CATS = {"kernel", "gpu_memcpy", "gpu_memset"}
-LAUNCHER_CATS = ("cuda_runtime", "Runtime", "gpu_user_annotation")
+# Anything that carries a `correlation` id and is not itself a kernel can be the
+# launcher of one. Two spellings matter in practice: PyTorch records its own
+# launches as `cuda_runtime` (cudaLaunchKernel), but cuBLAS -- which is where
+# every GEMM on the GPU leg comes from -- launches through the driver API as
+# `cuda_driver` (cuLaunchKernel/cuLaunchKernelEx). Without the latter, the
+# largest single slice of GPU device time has no enclosing frame and lands in
+# stage "other" (seen as 38.5% of a 0.6B decode trace).
+LAUNCHER_CATS = (
+    "cuda_runtime",
+    "cuda_driver",
+    "Runtime",
+    "gpu_user_annotation",
+)
 
 
 def load(path: str) -> list[dict]:
