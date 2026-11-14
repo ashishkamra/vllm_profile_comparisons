@@ -130,6 +130,78 @@ class StageIndex:
         return "other"
 
 
+class EnclosingOps:
+    """Maps (thread, timestamp) -> the innermost `cpu_op` enclosing it.
+
+    Device kernels carry no input shapes; `record_shapes` puts them on the
+    *host* op that issued the launch (aten::linear and friends). A kernel runs
+    on the CUDA stream thread, which has no host ops at all, so the lookup is
+    done at its launcher's (tid, ts) -- the launcher is recorded inside the
+    op that called into cuBLAS.
+
+    Same single-pass sweep as StageIndex: callers query in timestamp order per
+    thread, which makes this O((ops + queries) log n).
+    """
+
+    def __init__(self, events: list[dict]):
+        self._ops: dict[object, list[tuple[float, float, dict]]] = (
+            collections.defaultdict(list)
+        )
+        for e in events:
+            if e.get("cat") != "cpu_op":
+                continue
+            self._ops[e.get("tid")].append((e["ts"], e["ts"] + e["dur"], e))
+        for ops in self._ops.values():
+            # Widest first, so a stack pop always removes the innermost op.
+            ops.sort(key=lambda o: (o[0], -o[1]))
+        self._cursor: dict[object, int] = collections.defaultdict(int)
+        self._stack: dict[object, list[tuple[float, dict]]] = collections.defaultdict(list)
+
+    def op_at(self, tid, ts: float) -> dict | None:
+        ops = self._ops.get(tid)
+        if not ops:
+            return None
+
+        stack = self._stack[tid]
+        i = self._cursor[tid]
+        while i < len(ops) and ops[i][0] <= ts:
+            _start, end, op = ops[i]
+            stack.append((end, op))
+            i += 1
+        self._cursor[tid] = i
+
+        while stack and stack[-1][0] < ts:
+            stack.pop()
+
+        return stack[-1][1] if stack else None
+
+
+def gpu_op_class(kernel: dict, host_op: dict | None, *, vocab_size: int) -> str:
+    """Op class for a device kernel, refined through its enclosing host op.
+
+    Kernels name themselves ("cutlass_80_wmma...gemm"), which says it is a GEMM
+    but not *which* projection: on the GPU leg every GEMM therefore collapses
+    into one coarse `linear` bucket, while the CPU leg splits into
+    qkv/o_proj/gate_up/down because shapes are available there.
+
+    The split needs both the shape and the convention it was recorded in, so the
+    enclosing op is classified from its own name and args rather than by
+    borrowing its dims -- `aten::linear` orders Input Dims as [input, weight],
+    vLLM's custom kernels as [out, input, ...]. Only a coarse `linear` result is
+    refined, and only by another linear class; anything else leaves the kernel's
+    own verdict alone.
+    """
+    op_class = stages.op_class_for(
+        kernel.get("name", ""), kernel.get("args"), vocab_size=vocab_size
+    )
+    if op_class != "linear" or host_op is None:
+        return op_class
+    refined = stages.op_class_for(
+        host_op.get("name", ""), host_op.get("args"), vocab_size=vocab_size
+    )
+    return refined if refined.startswith("linear") else op_class
+
+
 def kernel_to_launcher(events: list[dict]) -> dict[int, dict]:
     """Map kernel event id -> the CPU runtime event that launched it (GPU traces)."""
     launchers: dict[str, dict] = {}
@@ -190,6 +262,7 @@ def main() -> int:
         st = self_times(events)
         index = StageIndex(events)
         launcher = kernel_to_launcher(events) if kind == "gpu" else {}
+        enclosing = EnclosingOps(events) if kind == "gpu" else None
         metric = "device_ms" if kind == "gpu" else "self_ms"
 
         # (stage, op_class) -> [ms, calls]
@@ -204,9 +277,14 @@ def main() -> int:
                 tid, ts = e.get("tid"), e["ts"]
 
             stage = index.stage_at(tid, ts)
-            op_class = stages.op_class_for(
-                e.get("name", ""), e.get("args"), vocab_size=args.vocab_size
-            )
+            if kind == "gpu":
+                op_class = gpu_op_class(
+                    e, enclosing.op_at(tid, ts), vocab_size=args.vocab_size
+                )
+            else:
+                op_class = stages.op_class_for(
+                    e.get("name", ""), e.get("args"), vocab_size=args.vocab_size
+                )
             stage = stages.refine_stage(stage, op_class)
             ms = st.get(id(e), e["dur"]) / 1000.0
             agg[(stage, op_class)][0] += ms
