@@ -100,6 +100,9 @@ for s in sync conc8; do harness/run_scenario.sh $s cpu-int8; done
 
 # 3. profile one scenario (writes a trace, not a benchmark; see R9 in docs/02)
 DEVICE=cpu VARIANT=int8 harness/profile_scenario.sh conc8
+#    Low-load alternative for an internals comparison: serial requests, no
+#    GuideLLM -> traces/<tag>-profile/. See "Profile-only runs" below.
+DEVICE=cpu VARIANT=ref harness/profile_run.sh
 
 # ...or do the whole leg in one go
 DEVICE=cpu harness/run_matrix.sh
@@ -121,6 +124,41 @@ did the time go overall" but "what was in this step and what was the scheduler's
 (see [`docs/04-request-lifecycle.md`](docs/04-request-lifecycle.md)). It reads the worker's
 own `execute_context_*(...)_generation_*(...)` annotations, so it only works on engine-core
 trace files (`rank0*`), not on the frontend one.
+
+### Profile-only runs (low load)
+
+Comparing CPU and GPU request processing needs **two traces**, not two benchmark matrices:
+`docs/03-stage-taxonomy.md` is read off the engine's own annotations, and the traced window
+is capped by engine iterations (R9), not by duration. So the load only has to *produce* those
+iterations, and `harness/profile_run.sh` does that with a handful of serial requests instead
+of GuideLLM:
+
+```bash
+DEVICE=cpu VARIANT=ref harness/profile_run.sh    # -> traces/cpu-ref-profile/rank0*
+DEVICE=gpu VARIANT=ref harness/profile_run.sh    # -> traces/gpu-ref-profile/rank0*
+```
+
+Each run sends one warmup request, then `PROFILE_REQUESTS` (4) serial requests of
+`PROFILE_PROMPT_TOKENS` (512) / `PROFILE_MAX_TOKENS` (128) with `ignore_eos`, under
+`max_iterations=20`. Prompt length is measured with the server's own tokenizer and reported
+in `results/<tag>-profile.requests.json`, so the prefill size in the trace is a fact rather
+than an assumption. Identical prompt text on both legs means identical prefill tokens and
+identical decode steps — the traces line up request for request.
+
+GuideLLM is deliberately not used here. Its open-loop concurrent profile holds 8 streams
+for a full minute and starts a request-loader process that prefetches thousands of samples;
+on the RTX 4060 host that drives sustained maximum load long after the profiler has stopped
+recording, and it has taken that machine down. Keep `run_scenario.sh`/`run_matrix.sh` for
+throughput numbers, which do need sustained concurrency — and note that a *profiled* run is
+eager, so its timings understate GPU throughput anyway (R6).
+
+On the GPU leg the script refuses to start above `GPU_TEMP_MAX` (default 80 °C) and prints
+the temperature before and after, because an overheating host is the failure mode that
+matters here.
+
+Both legs use the reference variant so the weights are the same and only the device
+differs. The dtype still differs by design (CPU `float32`, GPU `bfloat16`): the CPU has no
+bf16 hardware, so `dtype_for` gives each device its optimal precision.
 
 ### GPU startup troubleshooting
 

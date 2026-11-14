@@ -1,0 +1,35 @@
+{
+  "model": "Qwen/Qwen3-0.6B",
+  "requests": 4,
+  "prompt_tokens_requested": 512,
+  "prompt_tokens_actual": 512,
+  "max_tokens": 128,
+  "serial": true,
+  "records": [
+    {
+      "index": 0,
+      "seconds": 33.144,
+      "prompt_tokens": 512,
+      "completion_tokens": 128
+    },
+    {
+      "index": 1,
+      "seconds": 16.267,
+      "prompt_tokens": 512,
+      "completion_tokens": 128
+    },
+    {
+      "index": 2,
+      "seconds": 16.807,
+      "prompt_tokens": 512,
+      "completion_tokens": 128
+    },
+    {
+      "index": 3,
+      "seconds": 16.499,
+      "prompt_tokens": 512,
+      "completion_tokens": 128
+    }
+  ],
+  "total_seconds": 82.717
+}
