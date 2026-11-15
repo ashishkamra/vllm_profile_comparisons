@@ -55,10 +55,16 @@ its own kernels, and the recorded name is the dispatched op (`_C::onednn_mm`,
 therefore exist in the same study, and the analyzer picks one from the op name rather than
 guessing:
 
-| family | `Input Dims[0]`, `Input Dims[1]` | (K, N) |
+| family | `Input Dims` layout | (K, N) |
 |---|---|---|
-| `aten::linear`, `aten::mm`, `aten::addmm`, `aten::matmul` | `input (..., K)`, `weight (N, K)` | `dims[0][-1]`, `dims[1][0]` |
+| `aten::linear` | `input (..., K)`, `weight (N, K)` | `dims[0][-1]`, `dims[1][0]` |
+| `aten::mm`, `aten::matmul`, `aten::addmm` | `mat1 (..., M, K)`, `mat2 (K, N)` (`addmm` puts the 1-D bias first) | `dims[-2][-1]`, `dims[-1][-1]` |
 | vLLM custom kernels (`onednn*`, `sgl_*`, `cutlass_*`) | `out (..., N)`, `input (..., K)` | `dims[1][-1]`, `dims[0][-1]` |
+
+The `mm` row is not cosmetic: parsing it like a linear weight (`dims[1][0]`) gives `(K, K)`,
+so every projection comes out square — plausible-looking (`linear[1024x1024]`) and wrong.
+That is what a GPU leg looked like before the rule was fixed; the case is pinned by
+`test_aten_mm_uses_the_mat2_layout`.
 
 Real int8 example from a `rank0` trace: a fused QKV GEMM records as
 `_C::onednn_scaled_mm` with
