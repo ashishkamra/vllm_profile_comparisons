@@ -1,0 +1,75 @@
+=== default single 07:33:42
++ GPU at 43C before start
++ booting gpu-default-single (eager=0, worker_in_engine=0); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-default-single.serve.log
++ waiting for http://127.0.0.1:8000/health ........... up
++ start_profile (max_iterations=60)
+absorb: prompt    32  tokens   4  ttft      47.9 ms  itl     6.0 ms
+     R: prompt   512  tokens  32  ttft      42.2 ms  itl     6.3 ms
++ stop_profile
++ waiting for traces to be flushed ...
++ GPU at 47C after run
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-default-single.manifest.json
+processes: {'APIServer': 125314, 'EngineCore': 125372}
+trace files:
+  fedora_125314.async_llm.1794746046108950504.pt.trace.json.gz
+  fedora_125314.async_llm.profiler_out.txt
+  rank0.1794746046253257461.pt.trace.json.gz
+  rank0.profiler_out.txt
+=== eager single 07:34:47
++ GPU at 44C before start
++ booting gpu-eager-single (eager=1, worker_in_engine=1); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-eager-single.serve.log
++ waiting for http://127.0.0.1:8000/health .......... up
++ start_profile (max_iterations=60)
+absorb: prompt    32  tokens   4  ttft      56.6 ms  itl    15.2 ms
+     R: prompt   512  tokens  32  ttft      65.9 ms  itl    20.0 ms
++ stop_profile
++ waiting for traces to be flushed ...
++ GPU at 48C after run
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-eager-single.manifest.json
+processes: {'APIServer': 126679, 'EngineCore': 126742}
+trace files:
+  fedora_126679.async_llm.1794746108837385172.pt.trace.json.gz
+  fedora_126679.async_llm.profiler_out.txt
+  rank0.1794746110188244642.pt.trace.json.gz
+  rank0.profiler_out.txt
+=== eager staggered 07:36:09
++ GPU at 47C before start
++ booting gpu-eager-staggered (eager=1, worker_in_engine=1); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-eager-staggered.serve.log
++ waiting for http://127.0.0.1:8000/health .......... up
++ start_profile (max_iterations=120)
+absorb: prompt    32  tokens   4  ttft      57.4 ms  itl    14.3 ms
+     A: prompt   512  tokens  24  ttft      65.8 ms  itl    22.8 ms
+     B: prompt  1024  tokens  16  ttft     102.6 ms  itl    24.0 ms
+     C: prompt   256  tokens  16  ttft      69.8 ms  itl    22.2 ms
+     D: prompt   512  tokens   8  ttft      69.5 ms  itl    25.3 ms
++ stop_profile
++ waiting for traces to be flushed ...
++ GPU at 49C after run
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-eager-staggered.manifest.json
+processes: {'APIServer': 127068, 'EngineCore': 127125}
+trace files:
+  fedora_127068.async_llm.1794746191100615691.pt.trace.json.gz
+  fedora_127068.async_llm.profiler_out.txt
+  rank0.1794746192182582078.pt.trace.json.gz
+  rank0.profiler_out.txt
+=== default staggered 07:37:27
++ GPU at 46C before start
++ booting gpu-default-staggered (eager=0, worker_in_engine=0); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-default-staggered.serve.log
++ waiting for http://127.0.0.1:8000/health ..................... up
++ start_profile (max_iterations=120)
+absorb: prompt    32  tokens   4  ttft      26.4 ms  itl     5.9 ms
+     A: prompt   512  tokens  24  ttft      42.7 ms  itl     9.5 ms
+     B: prompt  1024  tokens  16  ttft      90.2 ms  itl     7.7 ms
+     C: prompt   256  tokens  16  ttft      42.0 ms  itl     7.6 ms
+     D: prompt   512  tokens   8  ttft      30.7 ms  itl     8.4 ms
++ stop_profile
++ waiting for traces to be flushed ...
++ GPU at 53C after run
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-default-staggered.manifest.json
+processes: {'APIServer': 127496, 'EngineCore': 127555}
+trace files:
+  fedora_127496.async_llm.1794746293111923982.pt.trace.json.gz
+  fedora_127496.async_llm.profiler_out.txt
+  rank0.1794746293341640998.pt.trace.json.gz
+  rank0.profiler_out.txt
+ALL_DONE
