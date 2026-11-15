@@ -4,7 +4,8 @@
 #   DEVICE=cpu VARIANT=ref harness/profile_run.sh
 #   DEVICE=gpu VARIANT=ref harness/profile_run.sh
 #
-# Same trace conditions as profile_scenario.sh -- enforce-eager, single process,
+# Same trace conditions as profile_scenario.sh -- enforce-eager, CPU worker kept in the
+# engine core (WORKER_IN_ENGINE, see serve.sh),
 # max_iterations cap, record_shapes -- because docs/02-methodology.md R6/R9 apply
 # to the trace, not to the load. The difference is only what drives the window:
 # a handful of serial requests, sized so the profiler's iteration cap is reached
@@ -56,7 +57,7 @@ fi
 mkdir -p "$R/results" "$TRACE_DIR"
 rm -f "$TRACE_DIR"/*.pt.trace.json* 2>/dev/null || true
 
-echo "+ booting $TAG (enforce-eager, single process, profiler on); log: $LOG" >&2
+echo "+ booting $TAG (enforce-eager, worker in engine core, profiler on); log: $LOG" >&2
 DEVICE="$DEVICE" VARIANT="$VARIANT" ENFORCE_EAGER=1 PROFILE_DIR="$TRACE_DIR" \
   "$R/harness/serve.sh" > "$LOG" 2>&1 &
 SERVER_PID=$!

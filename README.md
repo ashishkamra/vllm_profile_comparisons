@@ -4,8 +4,22 @@ A reproducible study of the **same model, same serving scenarios, two very diffe
 accelerators**, with matched load generation (GuideLLM) and matched profiling, so the
 latency numbers and the profiler traces can be read against each other.
 
-The point is not "GPU is faster". It is: *the two devices spend their time in
-different places, in ways you can see in a trace and predict from the hardware.*
+The point is not "GPU is faster". It is to understand **how vLLM processes a request**
+— which process, thread and function handles it at each moment — and which parts of that
+change when the device changes, using the profiler as the lens.
+
+**Start here: [`report/index.html`](report/index.html)** — *How vLLM serves a request, on a
+CPU and on a GPU*: one request followed through the API server, the engine core, the worker
+and the GPU, from eight captures with every process on one clock
+([`harness/journey_run.sh`](harness/journey_run.sh),
+[`analysis/journey.py`](analysis/journey.py)). The earlier op-class cost comparison is kept
+as [`report/op-costs.html`](report/op-costs.html).
+
+```bash
+DEVICE=cpu MODE=default SCENARIO=single harness/journey_run.sh   # seconds of load
+.venv-loadgen/bin/python analysis/journey.py --run all           # milestones + Perfetto traces
+.venv-loadgen/bin/python analysis/journey_figures.py             # figures/journey/*.png
+```
 
 | | CPU leg | GPU leg |
 |---|---|---|
@@ -223,10 +237,12 @@ weights and compiling kernels before it opens the HTTP port, so raise the limit
 with `SERVE_CHECK_TIMEOUT=1200`. `check_serve.sh` names its log file, and on an
 early exit prints the log tail, so a dead server never looks like a timeout.
 
-Profiled runs are single-process (`VLLM_ENABLE_V1_MULTIPROCESSING=0`) and bounded by engine
-iterations (`max_iterations=20`), because a multiprocess profile only records the idle
-frontend and an unbounded concurrent profile never finishes writing its trace. Throughput
-runs keep vLLM's defaults. See [R9](docs/02-methodology.md).
+The op-cost profiles keep the CPU worker inside the engine-core process
+(`VLLM_ENABLE_V1_MULTIPROCESSING=0`) so one trace holds scheduler and model, and are bounded
+by engine iterations (`max_iterations`), because an unbounded concurrent profile never
+finishes writing its trace. The API server is always a separate process. The request-journey
+runs keep vLLM's real layout. Throughput runs keep vLLM's defaults. See
+[R9](docs/02-methodology.md).
 
 ## Results: CPU leg
 
@@ -281,8 +297,10 @@ For what a *single step* is made of — the scheduler's own batch decision, the 
 the per-layer anatomy, and why the scenario ITL is larger than any decoded step — see
 [`docs/04-request-lifecycle.md`](docs/04-request-lifecycle.md).
 
-GPU leg: not yet run (no GPU on the CPU-side host). The command sequence is the same
-with `DEVICE=gpu`.
+GPU leg (RTX 4060 Laptop on a Ryzen 9 7940HS): profiled with the reference weights, in
+both vLLM's default configuration and eager mode — see `report/index.html` and
+`docs/05-cpu-vs-gpu-profile.md`. GuideLLM throughput runs were not repeated on that host:
+sustained load overheats it, so the GPU leg is profiled with seconds of load instead.
 
 ## Status
 
@@ -290,8 +308,10 @@ with `DEVICE=gpu`.
 - [x] CPU extension built from source with native ISA flags, verified end to end
       (fp32 and INT8 W8A8 both produce sane text; dispatched ISA and oneDNN kernel recorded)
 - [x] CPU leg: reference (fp32) + INT8 W8A8 numbers
-- [ ] GPU leg: reference (bf16) + FP8 W8A8
-- [ ] Comparison figures
+- [x] Request journey on both devices, default and eager, single and staggered requests
+      (`report/index.html`)
+- [x] CPU-vs-GPU op-class comparison, reference weights (`report/op-costs.html`)
+- [ ] GPU leg: FP8 W8A8, and GuideLLM throughput numbers
 
 Numbers land in `results/` (JSON/CSV only — raw traces are gitignored, see
 `.gitignore`). Everything here is measurement code, not a vLLM contribution.

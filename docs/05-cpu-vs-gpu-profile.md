@@ -17,7 +17,8 @@ analysis/plot_compare.py results/cpu-ref-profile-stages.csv \
 
 ## What was captured
 
-Both runs: Qwen3-0.6B (`ref`, no quantization), `--enforce-eager`, one process,
+Both runs: Qwen3-0.6B (`ref`, no quantization), `--enforce-eager`, the CPU worker kept
+inside the engine-core process (R9; the API server is always a separate process),
 `record_shapes=True`, one warmup request, then four serial requests of a
 512-token prompt with `ignore_eos` and 128 output tokens. The profiler records
 the first 20 engine iterations, which is exactly **one prefill step (512 context
@@ -174,13 +175,18 @@ time-to-first-token rather than steady-state throughput.
   layer, but it is not a throughput sample.
 - **The first request after `start_profile` is not representative.** It takes
   14.2 s on the GPU and 34.8 s on the CPU, against ~1.39 s and ~18 s for the
-  next three requests of identical shape. That gap is profiler startup (kineto
-  initialization and frame symbolization), and it lands *outside* the annotated
-  steps, which is why the trace shows normal per-step times. Do not read
+  next three requests of identical shape. That gap is the profiler stopping at
+  `max_iterations` *mid-request* and writing its trace on the engine's main
+  thread: the CPU server log shows “Max profiling iterations reached” at 17:20:05
+  and “Profiler stopped successfully” at 17:20:20, a 15 s freeze. It lands after
+  the last annotated step, which is why the trace shows normal per-step times.
+  (An earlier version of this caveat blamed profiler start-up; the journey runs,
+  which stop the profiler after the requests, show no such stall.) Do not read
   `results/*-profile.requests.json` as a latency measurement.
 - **The 32-token prefix-cache trap.** The harness warms up with a short request
-  and resets the prefix cache. On the GPU the reset did not take effect and the
-  profiled prefill scheduled 480 tokens instead of 512 — two 16-token blocks came
+  and calls `/reset_prefix_cache`, which in v0.33 is a dev-mode endpoint and
+  returned 404: the reset never ran, on either leg. On the GPU (16-token blocks)
+  the profiled prefill scheduled 480 tokens instead of 512 — two blocks came
   from the warmup. The warmup now carries a unique preamble, and
   `profile_run.sh` reads the scheduler's own context-token count back from the
   trace, so a mismatch fails loudly instead of skewing the comparison.

@@ -80,15 +80,24 @@ whose runner differs from the other leg is not comparable.
 Each scenario is run once warm (prefix cache warm, allocator warm) and then measured.
 `/reset_prefix_cache` between runs so run N is not accelerated by run N-1.
 
-**R9 — Profiled runs are single-process, and bounded by engine iterations.**
-Throughput runs keep vLLM's default multiprocessing. Profiled runs set
-`VLLM_ENABLE_V1_MULTIPROCESSING=0`, because in multiprocess mode `/start_profile` is only
-forwarded to the *worker*: the scheduler runs in a process that has no profiler at all, so
-the trace you get holds no ATen ops and no `engine.*` stages. One process means one trace
-containing scheduler, runner and model — which is the entire taxonomy.
+**R9 — Op-cost profiles keep the CPU worker inside the engine core, and are bounded by engine iterations.**
+`vllm serve` always runs the API server and the EngineCore as separate processes
+(`AsyncLLM` has no in-process mode). On the GPU the model worker runs inside the EngineCore.
+On the CPU, vLLM's default moves it into a third, worker process (`platforms/cpu.py:351`),
+and only the API server and the worker carry a torch profiler, so the scheduler is not
+traced. The op-cost runs (`profile_run.sh`, `profile_scenario.sh`) set
+`VLLM_ENABLE_V1_MULTIPROCESSING=0` (`WORKER_IN_ENGINE=1` in `harness/serve.sh`), which keeps
+the CPU worker in the EngineCore so one trace holds scheduler, runner and model. That changes
+the CPU's process layout. The request-journey runs (`harness/journey_run.sh`, mode
+`default`) keep vLLM's real layout and sample the CPU engine core with py-spy instead. An
+earlier version of this rule called the runs “single-process”; they never were, see
+`report/index.html#corrections`.
 
 The profiler is also capped with `/start_profile {"max_iterations": N}` (default 20)
-rather than by wall clock. An unbounded concurrent profile writes a trace large enough
+rather than by wall clock. Reaching the cap stops the profiler and writes the trace *on the
+engine's main thread*, which freezes the engine for as long as that takes (15 s in one CPU
+run), so the cap should sit above the steps of interest and `/stop_profile` should be called
+after the requests finish. An unbounded concurrent profile writes a trace large enough
 that `/stop_profile` times out on the RPC and the trace is never flushed; capping by
 iterations makes the trace size independent of scenario duration and keeps the profiled
 window comparable across scenarios and variants. Both legs use the same cap, so op *counts*
