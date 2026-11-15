@@ -1,0 +1,2581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>Reading a vLLM profile — CPU vs GPU, one step at a time</title>
+<meta name="description" content="A guided tour of two vLLM profiler traces: how a request becomes an engine step, how two different traces are forced into one vocabulary, and what the CPU and the GPU disagree about." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700;800;900&family=Red+Hat+Mono:wght@400;500;600&family=Red+Hat+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     TOKENS
+     ============================================================ */
+  :root {
+    --bg-canvas:      #151515;
+    --bg-elevated:    #1a1a1a;
+    --bg-inset:       #101010;
+    --bg-card:        #202020;
+    --bg-hover:       #262626;
+    --text-primary:   #ffffff;
+    --text-secondary: #d2d2d2;
+    --text-muted:     #8a8a8a;
+    --rh-red:         #EE0000;
+    --rh-red-dark:    #A30000;
+    --rh-teal:        #009596;
+    --rh-teal-light:  #2fc4c4;
+    --rh-blue:        #0066CC;
+    --rh-blue-light:  #4394e5;
+    --rh-purple:      #6753AC;
+    --rh-green:       #3E8635;
+    --rh-green-light: #5ba84f;
+    --rh-orange:      #F4B400;
+    --border-subtle:  #333333;
+    --border-muted:   #444444;
+    --border-strong:  #5a5a5a;
+
+    --font-sans: "Red Hat Display", "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+    --font-text: "Red Hat Text", "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+    --font-mono: "Red Hat Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    --fs-display-xl: clamp(2.1rem, 5.2vw, 3.4rem);
+    --fs-display-lg: clamp(1.55rem, 3.2vw, 2.05rem);
+    --fs-h2:         clamp(1.3rem, 2.4vw, 1.55rem);
+    --fs-h3:         1.05rem;
+    --fs-body-lead:  1.12rem;
+    --fs-body:       0.95rem;
+    --fs-label:      0.7rem;
+    --fs-small:      0.72rem;
+    --fs-micro:      0.64rem;
+
+    --space-xs:  0.5rem;
+    --space-sm:  0.75rem;
+    --space-md:  1rem;
+    --space-lg:  1.5rem;
+    --space-xl:  2rem;
+    --space-2xl: 3rem;
+    --space-3xl: 4.5rem;
+
+    --w-page: 1120px;
+    --w-prose: 74ch;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --shadow-card: 0 1px 0 rgba(255,255,255,0.03) inset, 0 12px 32px rgba(0,0,0,0.28);
+    --header-h: 56px;
+  }
+
+  /* ============================================================
+     BASE
+     ============================================================ */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header-h) + 24px); }
+  body {
+    margin: 0;
+    font-family: var(--font-text);
+    font-size: var(--fs-body);
+    line-height: 1.68;
+    color: var(--text-secondary);
+    background:
+      radial-gradient(900px 500px at 85% -10%, rgba(238,0,0,0.09), transparent 60%),
+      radial-gradient(700px 420px at 8% 4%, rgba(0,149,150,0.07), transparent 60%),
+      var(--bg-canvas);
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  img, svg { max-width: 100%; display: block; }
+  a { color: var(--rh-blue-light); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--rh-blue-light);
+    outline-offset: 3px;
+    border-radius: 3px;
+  }
+  ::selection { background: rgba(238,0,0,0.35); color: #fff; }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+    line-height: 1.16;
+    letter-spacing: -0.015em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  p { margin: 0 0 1rem; }
+  p:last-child { margin-bottom: 0; }
+  strong { color: var(--text-primary); font-weight: 600; }
+  em { color: var(--text-primary); font-style: italic; }
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    color: #f0d7d7;
+    background: rgba(255,255,255,0.055);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 4px;
+    padding: 0.1em 0.34em;
+    white-space: nowrap;
+  }
+  hr {
+    border: 0;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border-muted), transparent);
+    margin: var(--space-2xl) 0;
+  }
+
+  .skip-link {
+    position: absolute;
+    top: -60px; left: 16px;
+    z-index: 200;
+    background: var(--rh-red);
+    color: #fff;
+    padding: 0.6rem 1rem;
+    font-family: var(--font-sans);
+    font-weight: 600;
+    border-radius: 0 0 6px 6px;
+  }
+  .skip-link:focus { top: 0; }
+
+  /* ============================================================
+     HEADER / NAV
+     ============================================================ */
+  .site-header {
+    position: fixed;
+    inset: 0 0 auto 0;
+    height: var(--header-h);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    padding: 0 clamp(1rem, 4vw, 2.5rem);
+    background: rgba(21,21,21,0.86);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex: 0 0 auto;
+    font-family: var(--font-sans);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-primary);
+    white-space: nowrap;
+  }
+  .brand-dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--rh-red);
+    box-shadow: 0 0 0 4px rgba(238,0,0,0.16);
+  }
+  .brand span { color: var(--text-muted); font-weight: 500; }
+  .nav {
+    display: flex;
+    gap: 0.15rem;
+    margin-left: auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav a {
+    display: block;
+    padding: 0.38rem 0.62rem;
+    border-radius: 5px;
+    font-family: var(--font-sans);
+    font-size: 0.74rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+    transition: color .16s ease, background-color .16s ease;
+  }
+  .nav a:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); text-decoration: none; }
+  .nav a.active { color: var(--text-primary); background: rgba(238,0,0,0.16); }
+  .nav a.active::before {
+    content: "";
+    display: inline-block;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--rh-red);
+    margin-right: 0.4rem;
+    vertical-align: 1px;
+  }
+  .progress-track {
+    position: fixed;
+    top: var(--header-h);
+    left: 0; right: 0;
+    height: 2px;
+    background: transparent;
+    z-index: 101;
+  }
+  .progress-bar {
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, var(--rh-red), var(--rh-orange));
+    transition: width .08s linear;
+  }
+
+  /* ============================================================
+     LAYOUT
+     ============================================================ */
+  .wrap { width: min(var(--w-page), calc(100% - clamp(2rem, 8vw, 5rem))); margin-inline: auto; }
+  main { padding-top: var(--header-h); }
+  .section { padding: var(--space-3xl) 0 var(--space-2xl); border-top: 1px solid rgba(255,255,255,0.055); }
+  .section:first-of-type { border-top: 0; }
+  .section-head { margin-bottom: var(--space-xl); max-width: 62rem; }
+  .section-num {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--rh-red);
+    margin-bottom: 0.7rem;
+  }
+  .section-num::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    max-width: 120px;
+    background: linear-gradient(90deg, rgba(238,0,0,0.7), transparent);
+  }
+  .section h2 { font-size: var(--fs-h2); font-weight: 700; margin-bottom: 0.6rem; }
+  .section h3 {
+    font-size: var(--fs-h3);
+    font-weight: 600;
+    margin: var(--space-xl) 0 var(--space-sm);
+    padding-left: 0.7rem;
+    border-left: 3px solid var(--border-muted);
+  }
+  .section h3 .h3-tag {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-left: 0.55rem;
+    text-transform: uppercase;
+    font-weight: 400;
+  }
+  .lead { font-size: var(--fs-body-lead); color: var(--text-secondary); max-width: 68ch; }
+  .prose { max-width: var(--w-prose); }
+  .prose p { color: var(--text-secondary); }
+  .muted { color: var(--text-muted); }
+  .small { font-size: var(--fs-small); }
+  .mono { font-family: var(--font-mono); }
+  .nowrap { white-space: nowrap; }
+  .rh-red { color: var(--rh-red); }
+  .teal { color: var(--rh-teal-light); }
+  .blue { color: var(--rh-blue-light); }
+  .orange { color: var(--rh-orange); }
+  .green { color: var(--rh-green-light); }
+  .purple { color: #9b8ad4; }
+  .mt-0 { margin-top: 0; }
+  .mt-sm { margin-top: var(--space-sm); }
+  .mt-md { margin-top: var(--space-md); }
+  .mt-lg { margin-top: var(--space-lg); }
+  .mb-0 { margin-bottom: 0; }
+</style>
+<style>
+  /* ============================================================
+     HERO
+     ============================================================ */
+  .hero { padding: clamp(3rem, 8vw, 6rem) 0 var(--space-2xl); position: relative; }
+  .hero::after {
+    content: "";
+    position: absolute;
+    right: 0; top: 12%;
+    width: min(38vw, 420px);
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(238,0,0,0.13), transparent 66%);
+    pointer-events: none;
+    z-index: -1;
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 1.1rem;
+  }
+  .eyebrow::before { content: ""; width: 26px; height: 2px; background: var(--rh-red); }
+  .hero h1 {
+    font-size: var(--fs-display-xl);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    max-width: 19ch;
+    margin-bottom: 1.1rem;
+  }
+  .hero h1 em { font-style: normal; color: var(--rh-red); }
+  .hero-lead {
+    font-size: clamp(1rem, 1.7vw, 1.2rem);
+    max-width: 66ch;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-lg);
+  }
+  .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 1.4rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--border-subtle);
+  }
+  .hero-meta span strong { color: var(--text-secondary); font-weight: 500; }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    background: var(--border-subtle);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    margin-top: var(--space-xl);
+  }
+  .stat {
+    background: var(--bg-elevated);
+    padding: 1.15rem 1.2rem 1.1rem;
+  }
+  .stat-value {
+    font-family: var(--font-sans);
+    font-size: clamp(1.6rem, 3.2vw, 2.15rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
+    line-height: 1;
+    margin-bottom: 0.45rem;
+  }
+  .stat-value small { font-size: 0.52em; font-weight: 500; color: var(--text-muted); letter-spacing: 0; }
+  .stat-label {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    line-height: 1.45;
+  }
+
+  /* ============================================================
+     CARDS, CALLOUTS, PILLS
+     ============================================================ */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 255px), 1fr));
+    gap: var(--space-md);
+    margin: var(--space-lg) 0;
+  }
+  .card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.022), transparent 60%), var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 1.1rem 1.15rem 1.15rem;
+    box-shadow: var(--shadow-card);
+    position: relative;
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 1.1rem; bottom: 1.1rem;
+    width: 2px;
+    background: var(--border-muted);
+    border-radius: 2px;
+  }
+  .card.red::before    { background: var(--rh-red); }
+  .card.teal::before   { background: var(--rh-teal); }
+  .card.blue::before   { background: var(--rh-blue-light); }
+  .card.orange::before { background: var(--rh-orange); }
+  .card.green::before  { background: var(--rh-green-light); }
+  .card.purple::before { background: var(--rh-purple); }
+  .card h4 {
+    font-size: 0.92rem;
+    font-weight: 600;
+    margin-bottom: 0.45rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+  }
+  .card p { font-size: 0.88rem; line-height: 1.62; color: var(--text-secondary); }
+  .card .card-kicker {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.45rem;
+  }
+  .card-num {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    color: var(--text-muted);
+    border: 1px solid var(--border-muted);
+    border-radius: 99px;
+    padding: 0.05rem 0.4rem;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+  }
+
+  .callout {
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--border-muted);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    background: var(--bg-elevated);
+    padding: 1rem 1.15rem;
+    margin: var(--space-lg) 0;
+  }
+  .callout .callout-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.4rem;
+  }
+  .callout p { font-size: 0.9rem; }
+  .callout.note   { border-left-color: var(--rh-blue-light); }
+  .callout.note   .callout-label { color: var(--rh-blue-light); }
+  .callout.trap   { border-left-color: var(--rh-red); background: rgba(238,0,0,0.045); }
+  .callout.trap   .callout-label { color: #ff6b6b; }
+  .callout.insight{ border-left-color: var(--rh-teal); }
+  .callout.insight .callout-label { color: var(--rh-teal-light); }
+  .callout.warn   { border-left-color: var(--rh-orange); }
+  .callout.warn   .callout-label { color: var(--rh-orange); }
+
+  .pill-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.7rem 0; }
+  .pill {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.03em;
+    padding: 0.22rem 0.55rem;
+    border-radius: 99px;
+    border: 1px solid var(--border-muted);
+    color: var(--text-secondary);
+    background: rgba(255,255,255,0.03);
+  }
+  .pill.red   { border-color: rgba(238,0,0,0.5);   color: #ff8a8a; background: rgba(238,0,0,0.09); }
+  .pill.teal  { border-color: rgba(0,149,150,0.5); color: #5fd6d6; background: rgba(0,149,150,0.09); }
+  .pill.blue  { border-color: rgba(67,148,229,0.5);color: #8cbdf0; background: rgba(0,102,204,0.1); }
+  .pill.orange{ border-color: rgba(244,180,0,0.5); color: #f6cd62; background: rgba(244,180,0,0.08); }
+
+  /* ============================================================
+     TABLES
+     ============================================================ */
+  .table-wrap {
+    margin: var(--space-lg) 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    overflow-x: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.84rem;
+    min-width: 560px;
+  }
+  caption {
+    caption-side: top;
+    text-align: left;
+    padding: 0.75rem 1rem 0.65rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  th, td {
+    padding: 0.52rem 0.85rem;
+    text-align: left;
+    border-bottom: 1px solid rgba(255,255,255,0.055);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    font-weight: 500;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: rgba(255,255,255,0.025);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: rgba(255,255,255,0.022); }
+  td.num, th.num {
+    text-align: right;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  tr.total td {
+    background: rgba(238,0,0,0.07);
+    color: var(--text-primary);
+    font-weight: 600;
+    border-top: 1px solid rgba(238,0,0,0.28);
+  }
+  tr.sub td { color: var(--text-muted); font-size: 0.78rem; }
+  td.name { color: var(--text-primary); font-family: var(--font-mono); font-size: 0.79rem; white-space: nowrap; }
+  .bar-cell { min-width: 110px; }
+  .bar {
+    display: block;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border-muted);
+    position: relative;
+    margin-top: 0.28rem;
+  }
+  .bar > i { display: block; height: 100%; border-radius: 3px; background: var(--rh-teal); }
+  .bar.cpu > i { background: var(--rh-red); }
+  .bar.gpu > i { background: var(--rh-teal); }
+
+  /* ============================================================
+     CODE
+     ============================================================ */
+  pre {
+    margin: var(--space-md) 0;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 0.95rem 1.1rem;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 1.62;
+    color: #d8d8d8;
+    tab-size: 2;
+  }
+  pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+    white-space: pre;
+  }
+  pre .c  { color: #7d7d7d; }
+  pre .k  { color: #ff8a8a; }
+  pre .s  { color: #a8d8a8; }
+  pre .f  { color: #8cbdf0; }
+  pre .n  { color: #f6cd62; }
+  .code-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-top: var(--space-lg);
+    margin-bottom: -0.35rem;
+  }
+
+  /* ============================================================
+     FIGURES
+     ============================================================ */
+  figure {
+    margin: var(--space-xl) 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    overflow: hidden;
+  }
+  figure img {
+    width: 100%;
+    height: auto;
+    background: #fff;
+  }
+  figcaption {
+    padding: 0.8rem 1rem 0.9rem;
+    font-size: 0.8rem;
+    line-height: 1.55;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-subtle);
+  }
+  figcaption strong { color: var(--text-secondary); font-weight: 600; }
+  .fig-wide { margin-inline: calc(-1 * clamp(0rem, 3vw, 2rem)); }
+  @media (max-width: 640px) { .fig-wide { margin-inline: 0; } }
+
+  /* ============================================================
+     FLOW DIAGRAM
+     ============================================================ */
+  .flow {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border-subtle);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    margin: var(--space-lg) 0;
+  }
+  .flow-col { background: var(--bg-elevated); padding: 1rem 1.1rem 1.1rem; }
+  .flow-col h4 {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .flow-item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.6rem;
+    align-items: baseline;
+    padding: 0.38rem 0;
+    border-bottom: 1px dashed rgba(255,255,255,0.06);
+    font-size: 0.82rem;
+  }
+  .flow-item:last-child { border-bottom: 0; }
+  .flow-item .code-ref {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .flow-item.accent {
+    color: var(--text-primary);
+    border-left: 2px solid var(--rh-red);
+    margin-left: -0.6rem;
+    padding-left: 0.5rem;
+  }
+  .flow-note {
+    grid-column: 1 / -1;
+    padding: 0.7rem 1.1rem;
+    background: var(--bg-inset);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-subtle);
+  }
+  @media (max-width: 720px) { .flow { grid-template-columns: 1fr; } }
+
+  /* ============================================================
+     STEP LIST
+     ============================================================ */
+  .steps {
+    counter-reset: step;
+    list-style: none;
+    padding: 0;
+    margin: var(--space-lg) 0;
+    border-left: 1px solid var(--border-muted);
+    margin-left: 0.65rem;
+  }
+  .steps > li {
+    counter-increment: step;
+    position: relative;
+    padding: 0 0 var(--space-lg) 1.6rem;
+  }
+  .steps > li:last-child { padding-bottom: 0; }
+  .steps > li::before {
+    content: counter(step, decimal-leading-zero);
+    position: absolute;
+    left: -0.72rem;
+    top: 0.1rem;
+    width: 1.4rem;
+    height: 1.4rem;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--bg-canvas);
+    border: 1px solid var(--border-muted);
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    color: var(--text-muted);
+  }
+  .steps > li h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 0.28rem;
+  }
+  .steps > li p { font-size: 0.89rem; }
+
+  /* ============================================================
+     SPLIT / TERMS
+     ============================================================ */
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-lg);
+    align-items: start;
+  }
+  @media (max-width: 820px) { .split { grid-template-columns: 1fr; } }
+
+  .glossary { margin: var(--space-lg) 0; }
+  .term {
+    display: grid;
+    grid-template-columns: minmax(120px, 200px) 1fr;
+    gap: 1rem;
+    padding: 0.8rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.055);
+  }
+  .term:last-child { border-bottom: 0; }
+  .term dt {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-primary);
+    padding-top: 0.05rem;
+  }
+  .term dd { margin: 0; font-size: 0.87rem; }
+  @media (max-width: 560px) { .term { grid-template-columns: 1fr; gap: 0.2rem; } }
+
+  /* ============================================================
+     FOOTER
+     ============================================================ */
+  .site-footer {
+    border-top: 1px solid var(--border-subtle);
+    padding: var(--space-xl) 0 var(--space-2xl);
+    margin-top: var(--space-2xl);
+  }
+  .footer-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: var(--space-lg);
+    align-items: start;
+  }
+  @media (max-width: 720px) { .footer-grid { grid-template-columns: 1fr; } }
+  .site-footer p { font-size: 0.8rem; color: var(--text-muted); }
+  .site-footer .footer-mark {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 0.6rem;
+  }
+  .site-footer .footer-mark .brand-dot { width: 7px; height: 7px; }
+  .to-top {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border: 1px solid var(--border-muted);
+    border-radius: 99px;
+    padding: 0.4rem 0.85rem;
+    justify-self: end;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .to-top:hover { color: var(--text-primary); border-color: var(--border-strong); background: rgba(255,255,255,0.05); text-decoration: none; }
+
+  /* ============================================================
+     REVEAL ANIMATION
+     ============================================================ */
+  .reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity .55s cubic-bezier(.2,.7,.3,1), transform .55s cubic-bezier(.2,.7,.3,1);
+  }
+  .reveal.in { opacity: 1; transform: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+    .progress-bar { transition: none; }
+    * { animation-duration: 0.001ms !important; }
+  }
+
+  /* ============================================================
+     PRINT
+     ============================================================ */
+  @media print {
+    :root { --bg-canvas: #fff; --bg-elevated: #fff; --bg-card: #fff; --bg-inset: #f6f6f6;
+            --text-primary: #111; --text-secondary: #222; --text-muted: #555;
+            --border-subtle: #ccc; --border-muted: #bbb; }
+    body { background: #fff; font-size: 10.5pt; }
+    .site-header, .progress-track, .to-top, .skip-link { display: none !important; }
+    main { padding-top: 0; }
+    .section { padding: 1.2rem 0; break-inside: avoid-page; }
+    .section h2 { break-after: avoid; }
+    .card, .callout, figure, .table-wrap, pre { break-inside: avoid; box-shadow: none; }
+    .reveal { opacity: 1; transform: none; }
+    a { color: #0645ad; }
+    .hero { padding-top: 1rem; }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="brand"><span class="brand-dot"></span>vLLM <span>/ profiling</span></div>
+  <nav class="nav" aria-label="Report sections">
+    <a href="#why">Why</a>
+    <a href="#lifecycle">Lifecycle</a>
+    <a href="#contract">Contract</a>
+    <a href="#taxonomy">Taxonomy</a>
+    <a href="#one-step">One step</a>
+    <a href="#cpu">CPU</a>
+    <a href="#gpu">GPU</a>
+    <a href="#compare">Compare</a>
+    <a href="#attribution">Attribution</a>
+    <a href="#reproduce">Reproduce</a>
+    <a href="#limits">Limits</a>
+  </nav>
+</header>
+<div class="progress-track" aria-hidden="true"><div class="progress-bar" id="progress"></div></div>
+<main id="main">
+<section class="hero wrap" id="top">
+  <div class="eyebrow">A field guide to two traces</div>
+  <h1>Reading a vLLM profile, <em>one engine step</em> at a time</h1>
+  <p class="hero-lead">
+    Two traces of the same model, same prompt, same vLLM commit: one on a laptop CPU in
+    <code>float32</code>, one on an RTX&nbsp;4060 in <code>bfloat16</code>. The interesting
+    question is not which is faster. It is <strong>what the work is made of on each device</strong>,
+    and which parts of vLLM's request path change shape when the device changes.
+  </p>
+  <p class="hero-lead" style="font-size:1rem;color:var(--text-muted);">
+    This page is the long version of the answer: the method, the request lifecycle, the two
+    profiles, the comparison, and — the part that actually takes practice — how a raw trace
+    becomes an attribution you can defend.
+  </p>
+
+  <div class="stats" role="list">
+    <div class="stat" role="listitem">
+      <div class="stat-value">27.3<small>×</small></div>
+      <div class="stat-label">CPU host time ÷ GPU kernel time, attributed work only</div>
+    </div>
+    <div class="stat" role="listitem">
+      <div class="stat-value">20</div>
+      <div class="stat-label">engine iterations in the window: 1 prefill + 19 decodes</div>
+    </div>
+    <div class="stat" role="listitem">
+      <div class="stat-value">28</div>
+      <div class="stat-label">decoder layers per step, identical on both legs</div>
+    </div>
+    <div class="stat" role="listitem">
+      <div class="stat-value">13</div>
+      <div class="stat-label">op classes compared side by side in the final table</div>
+    </div>
+  </div>
+
+  <div class="hero-meta">
+    <span><strong>vLLM</strong> 0.33.0 · 4ba787ec99</span>
+    <span><strong>Model</strong> Qwen3-0.6B · 28 layers · hidden 1024</span>
+    <span><strong>CPU</strong> Alder Lake laptop · fp32</span>
+    <span><strong>GPU</strong> RTX 4060 Laptop 8&nbsp;GB · bf16</span>
+    <span><strong>Mode</strong> eager · single process · shapes on</span>
+  </div>
+</section>
+
+<section class="section wrap" id="why">
+  <div class="section-head">
+    <div class="section-num">01 · the question</div>
+    <h2>“27× faster” is a fact about one number, not about the work</h2>
+    <p class="lead">
+      A CPU-vs-GPU benchmark gives you a ratio. A profile gives you a decomposition — and the
+      decomposition is what tells you where to spend effort, what will survive quantization,
+      and which “optimization” is actually a measurement artefact.
+    </p>
+  </div>
+
+  <div class="prose reveal">
+    <p>
+      The headline number in this study is that the CPU leg spends <strong>3798.57&nbsp;ms</strong>
+      of host self time on the same attributed work that costs the GPU
+      <strong>138.97&nbsp;ms</strong> of kernel time — a ratio of <strong>27.3×</strong>. That
+      number is true and almost useless on its own. It mixes three different things: the
+      arithmetic (GEMMs), the memory traffic (weight streaming, KV cache), and the host-side
+      fixed costs (dispatch, launching, scheduler). A ratio cannot tell those apart.
+    </p>
+    <p>
+      Once you decompose it, a much more interesting picture appears. The <em>shape</em> of the
+      work is nearly identical on the two devices: the same five GEMMs per layer, in the same
+      order, with the same relative importance. What changes is the <em>multiplier</em> — about
+      29× for the projections — and a small number of structural facts that no multiplier
+      explains: RMSNorm exists as a fused kernel on the GPU but not on the CPU; decode is
+      bandwidth-bound on both; and on the GPU, most of the host's per-layer span contains no
+      device kernel at all, because the host is running ahead of the device.
+    </p>
+  </div>
+
+  <div class="cards">
+    <div class="card red reveal">
+      <div class="card-kicker">Question 1</div>
+      <h4>What is the work made of?</h4>
+      <p>
+        Which op classes, which layers, which phases of the engine step. This is the part that
+        transfers to other models and other hardware, because it is a statement about vLLM's
+        request path, not about a particular chip.
+      </p>
+    </div>
+    <div class="card teal reveal">
+      <div class="card-kicker">Question 2</div>
+      <h4>What changes with the device?</h4>
+      <p>
+        Not just the constant. Fusion (RMSNorm), decomposition (elementwise), binding resource
+        (weights vs KV vs launch rate), and what a “step” means when the host and the device
+        are on different clocks.
+      </p>
+    </div>
+    <div class="card blue reveal">
+      <div class="card-kicker">Question 3</div>
+      <h4>Which claims survive?</h4>
+      <p>
+        Every number here has a provenance: which rule produced it, which trace, which
+        caveat. The methodology section exists so you can reject a conclusion instead of
+        trusting it.
+      </p>
+    </div>
+    <div class="card orange reveal">
+      <div class="card-kicker">Question 4</div>
+      <h4>How does attribution fail?</h4>
+      <p>
+        A trace does not label its own work. The most instructive part of this repo is the
+        set of trace shapes that produced plausible, wrong answers — and the tests that now
+        pin them.
+      </p>
+    </div>
+  </div>
+
+  <div class="callout note reveal">
+    <span class="callout-label">How to read this page</span>
+    <p>
+      Sections 2–4 are the method: what a step is, what makes the comparison honest, and how
+      two incompatible traces are mapped into one vocabulary. Sections 5–8 are the evidence:
+      one step opened up, then the CPU trace, the GPU trace, and the side-by-side. Section 9
+      is the craft — six attribution bugs that looked like findings. Section 10 reproduces
+      everything; section 11 states what the study does <em>not</em> say.
+    </p>
+  </div>
+</section>
+<section class="section wrap" id="lifecycle">
+  <div class="section-head">
+    <div class="section-num">02 · the unit of work</div>
+    <h2>How a request becomes an engine step</h2>
+    <p class="lead">
+      A vLLM profile is not a record of requests. It is a record of <em>iterations</em>. The
+      engine pulls a batch from the scheduler, runs one forward pass, samples, updates state,
+      and repeats. Everything you can attribute is nested inside that loop.
+    </p>
+  </div>
+
+  <div class="prose reveal">
+    <p>
+      <code>vllm serve</code> runs two processes. The <strong>frontend</strong> owns the HTTP
+      boundary, tokenization, detokenization and streaming. The <strong>engine core</strong>
+      owns scheduling, KV-block bookkeeping, the model forward, and sampling. In a default
+      multiprocess deployment, <code>/start_profile</code> reaches only the worker — which is
+      why profiled runs set <code>VLLM_ENABLE_V1_MULTIPROCESSING=0</code>. One process, one
+      trace, scheduler and model together (R9).
+    </p>
+  </div>
+
+  <div class="flow reveal" role="img" aria-label="Two-process view of vLLM: frontend and engine core">
+    <div class="flow-col">
+      <h4>frontend process</h4>
+      <div class="flow-item"><span>HTTP / OpenAI API</span><span class="code-ref">entrypoints/</span></div>
+      <div class="flow-item"><span>request admission</span><span class="code-ref">async_llm.py</span></div>
+      <div class="flow-item"><span>tokenize prompt</span><span class="code-ref">tokenizers</span></div>
+      <div class="flow-item"><span>detokenize + stop strings</span><span class="code-ref">detokenizer.py</span></div>
+      <div class="flow-item"><span>stream chunks to client</span><span class="code-ref">output_processor.py</span></div>
+    </div>
+    <div class="flow-col">
+      <h4>engine-core process</h4>
+      <div class="flow-item accent"><span>EngineCore.step()</span><span class="code-ref">core.py:667</span></div>
+      <div class="flow-item accent"><span>Scheduler.schedule()</span><span class="code-ref">scheduler.py:699</span></div>
+      <div class="flow-item"><span>KV block alloc / prefix cache</span><span class="code-ref">kv_cache_manager.py</span></div>
+      <div class="flow-item accent"><span>Worker.execute_model()</span><span class="code-ref">the math</span></div>
+      <div class="flow-item"><span>sample_tokens()</span><span class="code-ref">separate RPC</span></div>
+      <div class="flow-item accent"><span>update_from_output()</span><span class="code-ref">scheduler.py</span></div>
+    </div>
+    <div class="flow-note">
+      Frontend work does not appear in the engine-core trace — different process, different file.
+      Profiled runs keep both in one process so the trace can contain both; this study's GPU
+      taxonomy is read from the engine trace.
+    </div>
+  </div>
+
+  <div class="code-label"><span>EngineCore.step() — six statements</span><span>vllm/v1/engine/core.py</span></div>
+<pre><code>scheduler_output = self.scheduler.schedule(...)                 <span class="c"># 1. decide the batch</span>
+future = self.model_executor.execute_model(                     <span class="c"># 2. submit forward (non-blocking)</span>
+    scheduler_output, non_block=<span class="k">True</span>)
+grammar_output = self.scheduler.get_grammar_bitmask(scheduler_output)  <span class="c"># 3. overlaps 2</span>
+model_output = future.result()                                  <span class="c"># 4. join</span>
+<span class="k">if</span> model_output <span class="k">is</span> <span class="k">None</span>:
+    model_output = self.model_executor.sample_tokens(grammar_output)   <span class="c"># 5. sample</span>
+engine_core_outputs = self.scheduler.update_from_output(...)    <span class="c"># 6. bookkeep</span></code></pre>
+
+  <h3>The trace labels the scheduler's decision<span class="h3-tag">trust this first</span></h3>
+  <div class="prose">
+    <p>
+      vLLM wraps every forward pass in a <code>user_annotation</code> whose name is the
+      scheduler's own summary of the step, written by <code>Worker.annotate_profile</code>:
+    </p>
+  </div>
+<pre><code>execute_context_&lt;n_ctx_reqs&gt;(&lt;n_ctx_tokens&gt;)_generation_&lt;n_gen_reqs&gt;(&lt;n_gen_tokens&gt;)</code></pre>
+
+  <div class="prose">
+    <p>
+      <strong>context</strong> means the request is still prefilling; <strong>generation</strong>
+      means it already has output tokens and this step gives it one more. So
+      <code>execute_context_1(512)_generation_0(0)</code> is a 512-token prefill, and
+      <code>execute_context_0(0)_generation_1(1)</code> is a one-token decode. This is not an
+      inference from timestamps: it is the scheduler telling you what it decided.
+    </p>
+    <p>
+      It also gives you a free correctness check. The token count must equal the GEMM's
+      <code>M</code> dimension. On the CPU leg the oneDNN ops record
+      <code>Input Dims = [[M, K], [K, N], ...]</code>, and <code>M</code> matches the
+      annotation exactly. If they ever disagree, the trace is mislabelled and nothing
+      downstream is worth reading.
+    </p>
+  </div>
+
+  <div class="callout trap reveal">
+    <span class="callout-label">The most common misreading</span>
+    <p>
+      <strong>Sampling is not inside the step annotation.</strong> <code>execute_model</code>
+      stashes logits and returns <code>None</code>; the engine core then calls
+      <code>sample_tokens</code> as a separate RPC. The annotation therefore covers the model
+      forward <em>and</em> <code>compute_logits</code>, but not the sampler. Sampling lives in
+      the inter-step gap, next to <code>schedule()</code> and
+      <code>update_from_output()</code>. A step that looks like it is missing its sampler is
+      not broken — it is designed that way.
+    </p>
+  </div>
+
+  <h3>One decode step, phase by phase<span class="h3-tag">CPU ref trace</span></h3>
+  <div class="table-wrap reveal">
+    <table>
+      <caption>Step 1 of the CPU reference trace — one request, one output token. Times in ms.</caption>
+      <thead>
+        <tr><th>phase</th><th>what it is</th><th class="num">ms</th><th class="num">share</th><th>where</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="name">_update_states</td><td>batch state, input tensors</td><td class="num">0.10</td><td class="num">0.1%</td><td class="mono small">gpu_model_runner.py</td></tr>
+        <tr><td class="name">_prepare_inputs</td><td>slot mapping, positions, block tables</td><td class="num">0.93</td><td class="num">0.7%</td><td class="mono small">gpu_model_runner.py</td></tr>
+        <tr><td class="name">_model_forward</td><td>embedding → 28 layers → final norm</td><td class="num">117.2</td><td class="num">83.2%</td><td class="mono small">28 decoder layers</td></tr>
+        <tr><td class="name">compute_logits</td><td>lm_head: 1024 → 151,936</td><td class="num">21.57</td><td class="num">15.3%</td><td class="mono small">qwen3.py</td></tr>
+        <tr class="sub"><td class="name">remainder of annotation</td><td>embedding, final norm, misc</td><td class="num">1.1</td><td class="num">0.8%</td><td class="mono small">—</td></tr>
+        <tr class="total"><td class="name">execute_model</td><td>the annotation</td><td class="num">140.9</td><td class="num">100%</td><td class="mono small">user_annotation</td></tr>
+        <tr class="sub"><td class="name">sample_tokens</td><td>sampler, separate RPC — outside the annotation</td><td class="num">1.51</td><td class="num">—</td><td class="mono small">gap</td></tr>
+        <tr class="sub"><td class="name">schedule</td><td>pick requests, allocate KV</td><td class="num">0.46</td><td class="num">—</td><td class="mono small">scheduler.py</td></tr>
+        <tr class="sub"><td class="name">update_from_output</td><td>append token, stop checks, free blocks</td><td class="num">0.19</td><td class="num">—</td><td class="mono small">scheduler.py</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="prose">
+    <p>
+      Two numbers dominate and they are not the ones people expect. The forward is 83% of the
+      step, and <strong>the vocabulary projection is 15–17%</strong> — more than the entire
+      scheduler, sampler and input preparation combined. That is a property of this model:
+      <code>lm_head</code> reads a 1024 × 151,936 weight matrix every step, whether the batch
+      is 1 row or 512. On the CPU in fp32 that is a 622&nbsp;MB read, so it is a bandwidth
+      floor, not arithmetic. Expect it in any Qwen3-0.6B profile; if it is absent, suspect the
+      trace.
+    </p>
+    <p>
+      The same table on the GPU has the same columns but different meanings:
+      <code>forward</code> is a <em>host span</em> of about 18–25&nbsp;ms per step, while the
+      step's device kernels sum to <strong>6.05&nbsp;ms</strong>. The host is enqueueing
+      work faster than the device drains it. That single asymmetry is the subject of section 7.
+    </p>
+  </div>
+
+  <div class="callout insight reveal">
+    <span class="callout-label">What changes at concurrency 8</span>
+    <p>
+      The step is the same; the batch is not. In the separate INT8 <code>conc8</code> run,
+      eight 512-token prompts are admitted together. With <code>max_num_batched_tokens=2048</code>
+      they need three prefill steps (step 0 takes one request; step 1 packs 2047 context tokens
+      plus one decode token; step 2 finishes 1537), then the window settles into 8-row decodes.
+      The trace shows it directly: <code>execute_context_4(2047)_generation_1(1)</code> followed
+      by <code>execute_context_0(0)_generation_8(8)</code>. Prefill and decode share a step
+      budget; they are not separate loops.
+    </p>
+  </div>
+</section>
+<section class="section wrap" id="contract">
+  <div class="section-head">
+    <div class="section-num">03 · the method</div>
+    <h2>Ten rules that make the comparison honest</h2>
+    <p class="lead">
+      A CPU-vs-GPU comparison is easy to run and easy to get wrong. Each rule below closes a
+      specific way the comparison can silently become a comparison of something else. The
+      rules are conditions on the <em>run</em>, not on the analysis — by the time you are
+      reading a chart, it is too late to fix them.
+    </p>
+  </div>
+
+  <div class="cards">
+    <div class="card red reveal">
+      <div class="card-kicker"><span class="card-num">R1</span> provenance</div>
+      <h4>Same commit, verified not assumed</h4>
+      <p>
+        Both legs run <code>4ba787ec99</code> (<code>v0.33.0</code>). The harness records
+        <code>git rev-parse HEAD</code> and <code>vllm.__version__</code>. The CPU leg must
+        build from source (<code>VLLM_TARGET_DEVICE=cpu</code>); the GPU leg may use a wheel.
+      </p>
+    </div>
+    <div class="card teal reveal">
+      <div class="card-kicker"><span class="card-num">R2</span> precision</div>
+      <h4>Device-optimal, with a reference run on each</h4>
+      <p>
+        CPU fp32 and INT8 W8A8; GPU bf16 and FP8 W8A8. Compare quantized-to-quantized
+        <em>and</em> reference-to-reference. Never compare the CPU reference against the GPU
+        quantized run and call the difference “the device”.
+      </p>
+    </div>
+    <div class="card blue reveal">
+      <div class="card-kicker"><span class="card-num">R3</span> cache</div>
+      <h4>KV cache dtype held constant</h4>
+      <p>
+        Quantize weights and activations, not the cache. <code>--kv-cache-dtype auto</code> on
+        both legs. Otherwise the decode profile mixes two changes and the bandwidth story stops
+        being interpretable.
+      </p>
+    </div>
+    <div class="card orange reveal">
+      <div class="card-kicker"><span class="card-num">R4</span> workload</div>
+      <h4>Identical load, identical tokens</h4>
+      <p>
+        GuideLLM 0.8.1, same data, same constraint, same profile on both legs. Token counts
+        are synthetic and exact, so <code>prompt_tokens</code> is never re-tuned per device.
+        Scenario ids are the single source of truth.
+      </p>
+    </div>
+    <div class="card purple reveal">
+      <div class="card-kicker"><span class="card-num">R5</span> server knobs</div>
+      <h4>Same scheduler, or it is not the same scheduler</h4>
+      <p>
+        <code>--max-model-len 2048 --max-num-seqs 16</code> on both. CPU pins
+        <code>OMP_NUM_THREADS</code> to the <em>physical</em> core count (14, from
+        <code>lscpu</code>, not <code>nproc</code>). Preemption counts are scraped; a non-zero
+        delta invalidates the run.
+      </p>
+    </div>
+    <div class="card red reveal">
+      <div class="card-kicker"><span class="card-num">R6</span> profiler mode</div>
+      <h4>Profiled runs are separate and eager</h4>
+      <p>
+        <code>--enforce-eager</code> on every profiled run: CUDA graphs turn N launches into one
+        replay node and destroy op-level attribution. Throughput is measured separately, without
+        eager, and reported separately. Both numbers are published; they answer different questions.
+      </p>
+    </div>
+    <div class="card teal reveal">
+      <div class="card-kicker"><span class="card-num">R7</span> code path</div>
+      <h4>Same model runner on both legs</h4>
+      <p>
+        v0.33 ships two runners. Triton is disabled on a CPU-only host, so auto-selection would
+        put the GPU on V2 and the CPU on V1. Both legs pin
+        <code>VLLM_USE_V2_MODEL_RUNNER=0</code>. Different runners are not comparable.
+      </p>
+    </div>
+    <div class="card blue reveal">
+      <div class="card-kicker"><span class="card-num">R8</span> warm state</div>
+      <h4>Fixtures before interpretation</h4>
+      <p>
+        Each scenario runs once warm (prefix cache, allocator) and then measured.
+        <code>/reset_prefix_cache</code> between runs so run N is not accelerated by run N−1.
+      </p>
+    </div>
+    <div class="card orange reveal">
+      <div class="card-kicker"><span class="card-num">R9</span> trace shape</div>
+      <h4>Single process, bounded by iterations</h4>
+      <p>
+        <code>VLLM_ENABLE_V1_MULTIPROCESSING=0</code>, so the trace contains scheduler, runner
+        and model. <code>/start_profile {"max_iterations": 20}</code> caps by forward passes,
+        not wall clock — trace size independent of scenario duration, identical on both legs.
+      </p>
+    </div>
+    <div class="card purple reveal">
+      <div class="card-kicker"><span class="card-num">R10</span> statistics</div>
+      <h4>Every mean carries its n</h4>
+      <p>
+        GuideLLM computes metrics over completed requests only. Duration-bounded runs leave
+        requests incomplete at the window edge; <code>request_totals</code> is copied next to
+        every mean so the incomplete fraction is visible, not inferred. Read
+        <code>benchmarks.json</code>, not the console.
+      </p>
+    </div>
+  </div>
+
+  <div class="callout note reveal">
+    <span class="callout-label">Two profiler knobs that are part of the contract</span>
+    <p>
+      <code>torch_profiler_record_shapes=true</code> is off by default at v0.33.0 and costs
+      overhead, but without shapes every projection collapses into one <code>linear</code>
+      bucket — the analyzer cannot separate qkv, o_proj, gate_up, down or lm_head. It is on
+      identically on both legs, so the overhead is symmetric.
+      <code>torch_profiler_with_stack=true</code> (vLLM's default) is what provides the
+      <code>python_function</code> frames that the whole stage axis depends on. Both are
+      required for the taxonomy in section 4 to mean anything.
+    </p>
+  </div>
+
+  <h3>Anti-patterns this study deliberately avoids</h3>
+  <div class="split">
+    <div class="reveal">
+      <ul class="prose" style="padding-left:1.1rem;font-size:0.9rem;">
+        <li style="margin-bottom:0.55rem;">Comparing a GPU with CUDA graphs against a CPU without them, then attributing the gap to “kernel efficiency”.</li>
+        <li style="margin-bottom:0.55rem;">Comparing fp32 CPU against FP8 GPU and calling it a hardware comparison.</li>
+        <li style="margin-bottom:0.55rem;">Profiling a cold run: JIT, allocator growth, first-touch pages.</li>
+        <li style="margin-bottom:0.55rem;">Quoting a sweep number without the concurrency it came from.</li>
+        <li>Reporting <code>torch.profiler</code> per-op sums as wall time on an async device.</li>
+      </ul>
+    </div>
+    <div class="reveal">
+      <div class="callout warn" style="margin-top:0;">
+        <span class="callout-label">The one-sentence version</span>
+        <p>
+          A profile is a measurement of a <em>specific</em> run under a <em>specific</em> set of
+          conditions. The method's job is to make those conditions identical everywhere except
+          the variable you are studying — here, the device.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <h3>Threats to validity, stated not hidden</h3>
+  <div class="cards">
+    <div class="card red reveal">
+      <h4>Quantization asymmetry</h4>
+      <p>
+        INT8 W8A8 and FP8 E4M3 are different numerics with different hardware support. The
+        study asks “how does each device spend its time when deployed the way you would deploy
+        it”, not “which device is faster at identical arithmetic”. Numerical quality is not
+        measured beyond a smoke check.
+      </p>
+    </div>
+    <div class="card orange reveal">
+      <h4>No AMX on this CPU</h4>
+      <p>
+        Alder Lake has AVX-VNNI but no AVX-512 and no AMX. The fast SGL INT8 path requires AMX,
+        so INT8 linear falls back to oneDNN; bf16 is emulated, which is why the CPU reference
+        is fp32. A Sapphire Rapids CPU would show a different INT8 profile.
+      </p>
+    </div>
+    <div class="card purple reveal">
+      <h4>Hybrid-core topology</h4>
+      <p>
+        P-cores and E-cores are not equivalent. <code>OMP_NUM_THREADS</code> fixes the count,
+        not which cores run. Record it, keep it fixed, do not “tune” it per run.
+      </p>
+    </div>
+    <div class="card blue reveal">
+      <h4>One run per point</h4>
+      <p>
+        No between-run error bars. The p95 columns are within-run distributions, not confidence
+        intervals. A repeat of the INT8 sync point moved &lt;1%; treat differences under a few
+        percent as noise.
+      </p>
+    </div>
+    <div class="card teal reveal">
+      <h4>Host-specific ISA build</h4>
+      <p>
+        The CPU extension is compiled <code>-march=native</code>, so the wheel is valid only on
+        the build host. <code>probe_isa.sh</code> records what actually runs: the AVX2
+        <code>.so</code> is mapped, and oneDNN selects <code>avx2_vnni</code> for the INT8 GEMM.
+      </p>
+    </div>
+    <div class="card green reveal">
+      <h4>Async device time</h4>
+      <p>
+        On GPU, host spans and device kernels are on different clocks. Summing per-op self time
+        is not wall time. The analyzer reports device time and host time separately and never
+        adds them.
+      </p>
+    </div>
+  </div>
+</section>
+<section class="section wrap" id="taxonomy">
+  <div class="section-head">
+    <div class="section-num">04 · the common language</div>
+    <h2>Two traces, one vocabulary</h2>
+    <p class="lead">
+      A CPU trace and a CUDA trace do not share structure. If each is aggregated with its own
+      natural grouping, you get two charts you cannot put next to each other. So both legs are
+      mapped into one fixed vocabulary <em>before</em> anything is plotted.
+    </p>
+  </div>
+
+  <div class="prose reveal">
+    <p>
+      Two orthogonal axes. Every row of the output CSVs carries both: the <strong>engine
+      stage</strong> answers “which part of vLLM is doing this”, and the <strong>op class</strong>
+      answers “what kind of work is it”. A row like <code>linear.gate_up / model.forward</code>
+      is the intersection of the two.
+    </p>
+  </div>
+
+  <div class="split">
+    <div class="reveal">
+      <h3 style="margin-top:0;">Axis A — engine stage</h3>
+      <p class="prose small">
+        From <code>python_function</code> events, which exist on both devices because the same
+        Python code runs on both. The nearest enclosing frame decides the stage.
+        <code>with_stack=True</code> is what puts those frames in the trace.
+      </p>
+    </div>
+    <div class="reveal">
+      <h3 style="margin-top:0;">Axis B — op class</h3>
+      <p class="prose small">
+        From ATen op names and — when <code>record_shapes</code> is on — tensor shapes. The
+        sub-stage split inside <code>model.forward</code> is derived from shapes, not by
+        patching the model, because <code>layers/linear.py</code> is one frame used by every
+        projection.
+      </p>
+    </div>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table>
+      <caption>Axis A — stage assignment. Frame matching is a substring test on the file in the frame name.</caption>
+      <thead><tr><th>stage</th><th>frame match</th></tr></thead>
+      <tbody>
+        <tr><td class="name">frontend.tokenize</td><td><code>v1/engine/</code>, <code>entrypoints/</code>, tokenizer frames</td></tr>
+        <tr><td class="name">engine.schedule</td><td><code>v1/core/sched/scheduler.py</code> · <code>schedule</code></td></tr>
+        <tr><td class="name">engine.kv_cache</td><td><code>kv_cache_manager.py</code>, <code>block_pool.py</code>, <code>kv_cache_utils.py</code></td></tr>
+        <tr><td class="name">engine.postprocess</td><td><code>scheduler.py</code> · <code>update_from_output</code>, <code>_free_request</code></td></tr>
+        <tr><td class="name">runner.prepare_inputs</td><td>model-runner file, function matching <code>prepare_input</code></td></tr>
+        <tr><td class="name">runner.execute_model</td><td>model-runner file, function matching <code>execute_model</code></td></tr>
+        <tr><td class="name">runner.glue</td><td>any other frame in a model-runner file</td></tr>
+        <tr><td class="name">model.forward</td><td><code>vllm/model_executor/models/</code>, <code>layers/</code></td></tr>
+        <tr><td class="name">model.lm_head</td><td>shape rule — <code>N = vocab_size</code> (Axis B)</td></tr>
+        <tr><td class="name">sample</td><td><code>v1/worker/*/sample/</code>, <code>cpu/sampler.py</code>, <code>v1/sample/ops/</code></td></tr>
+        <tr><td class="name">frontend.other</td><td><code>v1/engine/llm_engine.py</code>, <code>async_llm.py</code>, <code>output_processor.py</code></td></tr>
+        <tr><td class="name">frontend.detokenize</td><td><code>v1/engine/detokenizer.py</code>, <code>tokenizer.decode</code></td></tr>
+        <tr><td class="name">other</td><td>anything unmatched — reported, never silently dropped</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn reveal">
+    <span class="callout-label">The unmatched bucket is a health metric</span>
+    <p>
+      Unmatched time goes to <code>other</code>, not to the nearest plausible stage. If
+      <code>other</code> exceeds roughly 10%, the taxonomy is wrong for this commit and must be
+      fixed before drawing conclusions. Section 9's first two case studies are exactly this
+      alarm firing.
+    </p>
+  </div>
+
+  <h3>Shapes are the sub-stage key<span class="h3-tag">Qwen3-0.6B</span></h3>
+  <div class="prose">
+    <p>
+      Qwen3-0.6B: hidden 1024, 16 Q heads / 8 KV heads, head_dim 128, intermediate 3072,
+      vocab 151,936, 28 layers, tied embeddings. Four fused projections per layer, plus the
+      vocabulary head:
+    </p>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table>
+      <caption>Shape rule for Qwen3-0.6B. (K, N) is the GEMM's input width and output width.</caption>
+      <thead><tr><th class="num">K</th><th class="num">N</th><th>op class</th><th>what it is</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1024</td><td class="num">4096</td><td class="name">linear.qkv</td><td>fused Q/K/V — 2048 (Q) + 1024 (K) + 1024 (V)</td></tr>
+        <tr><td class="num">2048</td><td class="num">1024</td><td class="name">linear.o_proj</td><td>attention output projection</td></tr>
+        <tr><td class="num">1024</td><td class="num">6144</td><td class="name">linear.gate_up</td><td>fused gate + up</td></tr>
+        <tr><td class="num">3072</td><td class="num">1024</td><td class="name">linear.down</td><td>down projection</td></tr>
+        <tr><td class="num">1024</td><td class="num">151936</td><td class="name">linear.lm_head</td><td>vocabulary projection — also promotes the stage to <code>model.lm_head</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="prose">
+    <p>
+      The CPU leg emits <strong>no <code>aten::linear</code> at all</strong>. vLLM dispatches
+      the projection straight to its own kernel, and the recorded name is the dispatched op
+      (<code>_C::onednn_mm</code>, <code>_C::onednn_scaled_mm</code>, <code>_C::sgl_gemm</code>,
+      <code>cutlass_scaled_mm</code>, …). So two dims conventions coexist in the same study,
+      and the analyzer picks one from the op name instead of guessing:
+    </p>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table>
+      <caption>How to read <code>Input Dims</code> for the three GEMM families.</caption>
+      <thead><tr><th>family</th><th><code>Input Dims</code> layout</th><th>(K, N)</th></tr></thead>
+      <tbody>
+        <tr><td class="name">aten::linear</td><td><code>input (..., K)</code>, <code>weight (N, K)</code></td><td><code>dims[0][-1]</code>, <code>dims[1][0]</code></td></tr>
+        <tr><td class="name">aten::mm · matmul · addmm</td><td><code>mat1 (..., M, K)</code>, <code>mat2 (K, N)</code>; addmm puts the 1-D bias first</td><td><code>dims[-2][-1]</code>, <code>dims[-1][-1]</code></td></tr>
+        <tr><td class="name">onednn* · sgl_* · cutlass_*</td><td><code>out (..., N)</code>, <code>input (..., K)</code></td><td><code>dims[1][-1]</code>, <code>dims[0][-1]</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout trap reveal">
+    <span class="callout-label">Trap — the plausible square</span>
+    <p>
+      Parsing <code>aten::mm</code> like a linear weight (<code>dims[1][0]</code>) gives
+      <code>(K, K)</code>, so every projection comes out square. The result is
+      <code>linear[1024x1024]</code>: plausible-looking, consistent, and completely wrong. That
+      is what an early GPU leg looked like before the rule was fixed. The case is pinned by
+      <code>test_aten_mm_uses_the_mat2_layout</code>, and section 9 tells the story.
+    </p>
+  </div>
+
+  <div class="prose">
+    <p>
+      A real int8 example from a <code>rank0</code> trace: a fused QKV GEMM records as
+      <code>_C::onednn_scaled_mm</code> with
+      <code>Input Dims = [[64, 4096], [64, 1024], [64, 1], [], [1, 4096], [], []]</code>.
+      Using the custom-kernel convention: <code>out = [64, 4096] → N = 4096</code>,
+      <code>input = [64, 1024] → K = 1024</code>, hence <code>linear.qkv</code>. Getting this
+      backwards silently relabels every projection, which is why the rule is unit-tested with
+      dims copied from a real trace.
+    </p>
+    <p>
+      Op classes that do not come from shapes are matched by name: <code>attention.paged</code>
+      (<code>paged_attention</code>, <code>flash_fwd</code>, <code>cpu_attention_with_kv_cache</code>, …),
+      <code>attention.kv_write</code> (<code>reshape_and_cache</code>, …),
+      <code>norm</code> (<code>aten::rms_norm</code>, <code>*norm*</code>),
+      <code>rope</code>, <code>activation</code>, <code>quant</code>, <code>elementwise</code>
+      (remaining <code>aten::</code> pointwise ops), <code>sampler</code>, and <code>python</code>
+      (a frame with no ATen child — real interpreter overhead, not idle time).
+    </p>
+  </div>
+
+  <h3>What counts as attributed time<span class="h3-tag">and which column</span></h3>
+  <div class="table-wrap reveal">
+    <table>
+      <caption>The attribution rule, and the time column each trace kind uses.</caption>
+      <thead><tr><th>trace</th><th>attributed events</th><th>column</th><th>meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="name">CPU</td><td><code>cpu_op</code> + <code>user_annotation</code></td><td class="name">self_ms</td><td>host self time — on a CPU, host time <em>is</em> wall time</td></tr>
+        <tr><td class="name">GPU</td><td>device <code>kernel</code>, <code>gpu_memcpy</code>, <code>gpu_memset</code>, correlated to the launching op</td><td class="name">device_ms</td><td>kernel duration — “where the FLOPs went”</td></tr>
+        <tr><td class="name">GPU</td><td>host spans</td><td class="name">host_ms</td><td>launch overhead and Python — “where the Python went”</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="prose">
+    <p>
+      Bare <code>python_function</code> <em>self</em> time is deliberately excluded. In a
+      serving trace it is dominated by asyncio and queue waits: on an idle CPU int8 profile it
+      was about 51&nbsp;s of “self time” against 2.2&nbsp;s of actual op time. Including it
+      would turn every chart into a chart of waiting. The analyzer prints the excluded total
+      next to the attributed total, so the omission stays visible.
+    </p>
+    <p>
+      The two GPU columns are never added together. <code>device_ms</code> and
+      <code>host_ms</code> are different physical measurements on different clocks.
+    </p>
+  </div>
+</section>
+<section class="section wrap" id="one-step">
+  <div class="section-head">
+    <div class="section-num">05 · the evidence, opened up</div>
+    <h2>Twenty steps, layer by layer</h2>
+    <p class="lead">
+      The window is exactly <strong>one prefill step</strong> (512 context tokens) plus
+      <strong>19 decode steps</strong>, over 28 layers. Four serial requests of 512 prompt /
+      128 output tokens are driven, but the profiler stops at 20 iterations — so everything
+      below is one request's prefill and the first 19 tokens of its decode.
+    </p>
+  </div>
+
+  <div class="prose reveal">
+    <p>
+      Both legs use the same model, tokenizer, prompt text and iteration cap, so the
+      <em>scheduler shape</em> of the window is identical. The CPU trace's window is 4.54&nbsp;s;
+      the GPU trace's is 0.49&nbsp;s. Same 20 steps, same 512-token prefill, same 28 layers.
+      That is the precondition for every comparison that follows.
+    </p>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table style="min-width:820px;">
+      <caption>CPU reference trace — all 20 engine steps. Times in ms; <code>step</code> is the annotation, <code>gap</code> is between annotations.</caption>
+      <thead>
+        <tr>
+          <th class="num">#</th><th class="num">ctx req/tok</th><th class="num">gen req/tok</th><th class="num">tokens</th>
+          <th class="num">state</th><th class="num">prepare</th><th class="num">forward</th><th class="num">logits</th>
+          <th class="num">sample</th><th class="num">sched</th><th class="num">post</th><th class="num">step</th><th class="num">gap</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="num">0</td><td class="num">1/512</td><td class="num">0/0</td><td class="num">512</td><td class="num">0.47</td><td class="num">0.97</td><td class="num">1386.2</td><td class="num">24.38</td><td class="num">1.58</td><td class="num">0.87</td><td class="num">0.56</td><td class="num"><strong>1413.1</strong></td><td class="num">3.69</td></tr>
+        <tr><td class="num">1</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.10</td><td class="num">0.93</td><td class="num">117.2</td><td class="num">21.57</td><td class="num">1.51</td><td class="num">0.46</td><td class="num">0.19</td><td class="num">140.9</td><td class="num">2.66</td></tr>
+        <tr><td class="num">2</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.08</td><td class="num">1.16</td><td class="num">138.1</td><td class="num">23.14</td><td class="num">0.70</td><td class="num">0.50</td><td class="num">0.19</td><td class="num">164.1</td><td class="num">1.69</td></tr>
+        <tr><td class="num">3</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.09</td><td class="num">0.85</td><td class="num">117.5</td><td class="num">23.72</td><td class="num">0.78</td><td class="num">0.41</td><td class="num">0.19</td><td class="num">143.1</td><td class="num">1.69</td></tr>
+        <tr><td class="num">4</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.07</td><td class="num">0.91</td><td class="num">111.3</td><td class="num">24.28</td><td class="num">0.67</td><td class="num">0.43</td><td class="num">0.20</td><td class="num">137.7</td><td class="num">1.63</td></tr>
+        <tr><td class="num">5</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.10</td><td class="num">0.94</td><td class="num">109.8</td><td class="num">24.89</td><td class="num">0.63</td><td class="num">0.39</td><td class="num">0.17</td><td class="num">136.7</td><td class="num">1.45</td></tr>
+        <tr><td class="num">6</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.07</td><td class="num">0.91</td><td class="num">118.6</td><td class="num">24.44</td><td class="num">0.63</td><td class="num">0.39</td><td class="num">0.17</td><td class="num">144.9</td><td class="num">1.47</td></tr>
+        <tr><td class="num">7</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.09</td><td class="num">1.18</td><td class="num">117.8</td><td class="num">25.94</td><td class="num">0.70</td><td class="num">0.46</td><td class="num">0.20</td><td class="num">146.2</td><td class="num">1.67</td></tr>
+        <tr><td class="num">8</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.08</td><td class="num">0.96</td><td class="num">112.9</td><td class="num">25.46</td><td class="num">0.76</td><td class="num">0.45</td><td class="num">0.18</td><td class="num">140.3</td><td class="num">1.77</td></tr>
+        <tr><td class="num">9</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.10</td><td class="num">1.04</td><td class="num">114.2</td><td class="num">21.97</td><td class="num">1.04</td><td class="num">0.45</td><td class="num">0.18</td><td class="num">138.4</td><td class="num">2.11</td></tr>
+        <tr><td class="num">10</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.08</td><td class="num">1.36</td><td class="num">127.0</td><td class="num">23.29</td><td class="num">0.86</td><td class="num">0.54</td><td class="num">0.22</td><td class="num">153.1</td><td class="num">2.00</td></tr>
+        <tr><td class="num">11</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.09</td><td class="num">0.93</td><td class="num">123.5</td><td class="num">25.78</td><td class="num">0.71</td><td class="num">0.51</td><td class="num">0.21</td><td class="num">151.3</td><td class="num">1.77</td></tr>
+        <tr><td class="num">12</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.09</td><td class="num">1.13</td><td class="num">166.0</td><td class="num">30.82</td><td class="num">0.73</td><td class="num">0.41</td><td class="num">0.18</td><td class="num">199.3</td><td class="num">1.64</td></tr>
+        <tr><td class="num">13</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.08</td><td class="num">1.35</td><td class="num">149.1</td><td class="num">23.61</td><td class="num">0.70</td><td class="num">0.51</td><td class="num">0.18</td><td class="num">175.2</td><td class="num">1.73</td></tr>
+        <tr><td class="num">14</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.11</td><td class="num">1.38</td><td class="num">171.7</td><td class="num">21.18</td><td class="num">0.72</td><td class="num">0.53</td><td class="num">0.21</td><td class="num">195.7</td><td class="num">1.79</td></tr>
+        <tr><td class="num">15</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.07</td><td class="num">1.07</td><td class="num">162.0</td><td class="num">24.48</td><td class="num">0.70</td><td class="num">0.52</td><td class="num">0.22</td><td class="num">189.2</td><td class="num">1.92</td></tr>
+        <tr><td class="num">16</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.09</td><td class="num">1.22</td><td class="num">180.6</td><td class="num">22.56</td><td class="num">0.74</td><td class="num">0.54</td><td class="num">0.19</td><td class="num">205.4</td><td class="num">1.93</td></tr>
+        <tr><td class="num">17</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.08</td><td class="num">1.13</td><td class="num">127.3</td><td class="num">22.45</td><td class="num">0.71</td><td class="num">0.58</td><td class="num">0.21</td><td class="num">151.9</td><td class="num">1.96</td></tr>
+        <tr><td class="num">18</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.08</td><td class="num">1.14</td><td class="num">124.5</td><td class="num">23.98</td><td class="num">0.62</td><td class="num">0.51</td><td class="num">0.20</td><td class="num">150.6</td><td class="num">1.77</td></tr>
+        <tr><td class="num">19</td><td class="num">0/0</td><td class="num">1/1</td><td class="num">1</td><td class="num">0.08</td><td class="num">1.11</td><td class="num">124.4</td><td class="num">24.08</td><td class="num">0.00</td><td class="num">0.00</td><td class="num">0.00</td><td class="num">150.7</td><td class="num">0.00</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="prose">
+    <p>
+      Read the table as a story. Step 0 is the prefill: 512 tokens, 1386&nbsp;ms of forward.
+      Steps 1–19 are decodes: one token each, 110–180&nbsp;ms of forward. The columns that do
+      <em>not</em> move are as informative as the one that does: <code>state</code> is
+      ~0.08&nbsp;ms, <code>prepare</code> ~1&nbsp;ms, <code>logits</code> ~23&nbsp;ms,
+      <code>sample</code> &lt;1&nbsp;ms, <code>sched</code> ~0.5&nbsp;ms. The variability in
+      decode (steps 12, 14, 15 and 16 reach 166–181&nbsp;ms) is laptop host noise, not model structure — which
+      is why the report quotes shares and per-projection ratios, and treats absolute CPU
+      milliseconds as ±15%.
+    </p>
+    <p>
+      Step 19 shows zero sample/schedule/postproc because those phases are measured in the gap
+      <em>between</em> annotations, and there is no next annotation to bound it. The work
+      happened; the table simply has no window in which to see it.
+    </p>
+  </div>
+
+  <h3>The same 28 layers, two batch shapes</h3>
+  <div class="table-wrap reveal">
+    <table>
+      <caption>CPU reference trace — mean per layer, excluding layer 0. Decode is 1 token; prefill is 512.</caption>
+      <thead>
+        <tr><th>component</th><th class="num">decode ms</th><th class="num">share</th><th class="num">prefill ms</th><th class="num">share</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="name">mlp.gate_up</td><td class="num">1.05</td><td class="num">25.4%</td><td class="num"><strong>14.93</strong></td><td class="num"><strong>30.4%</strong></td></tr>
+        <tr><td class="name">attn.qkv</td><td class="num">0.76</td><td class="num">18.4%</td><td class="num">10.31</td><td class="num">21.0%</td></tr>
+        <tr><td class="name">mlp.down</td><td class="num">0.54</td><td class="num">13.2%</td><td class="num">8.14</td><td class="num">16.6%</td></tr>
+        <tr><td class="name">attn.o_proj</td><td class="num">0.37</td><td class="num">9.1%</td><td class="num">5.41</td><td class="num">11.0%</td></tr>
+        <tr><td class="name">attn.core <span class="muted">(paged attn + KV write)</span></td><td class="num">0.30</td><td class="num">7.3%</td><td class="num">3.73</td><td class="num">7.6%</td></tr>
+        <tr><td class="name">norm <span class="muted">(4 per layer)</span></td><td class="num">0.18</td><td class="num">4.4%</td><td class="num">2.64</td><td class="num">5.4%</td></tr>
+        <tr><td class="name">mlp.act <span class="muted">(SiLU × gate)</span></td><td class="num">0.02</td><td class="num">0.5%</td><td class="num">1.33</td><td class="num">2.7%</td></tr>
+        <tr><td class="name">rope</td><td class="num">0.01</td><td class="num">0.2%</td><td class="num">0.17</td><td class="num">0.4%</td></tr>
+        <tr><td class="name">elementwise</td><td class="num">0.01</td><td class="num">0.3%</td><td class="num">0.03</td><td class="num">0.1%</td></tr>
+        <tr><td class="name">unattributed</td><td class="num">0.87</td><td class="num"><strong>21.2%</strong></td><td class="num">2.48</td><td class="num">5.0%</td></tr>
+        <tr class="total"><td class="name">total</td><td class="num">4.12</td><td class="num">100%</td><td class="num">49.19</td><td class="num">100%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <figure class="reveal">
+    <img src="assets/fig-step-cpu-ref.png" alt="Layer-by-layer stacked bars for the CPU reference trace: 28 narrow decode layers of about 4 ms and 28 wide prefill layers of about 49 ms, split by component." loading="lazy" />
+    <figcaption>
+      <strong>Every layer of this trace.</strong> Decode bars are ~4.1&nbsp;ms each; prefill bars
+      ~49&nbsp;ms each. The colour split is the table above, layer for layer. The visibly longer
+      decode bars (L0 and a handful around L13–L17) are the one-time primitive build and the
+      same host noise that shows up in the step table — which is why the report quotes means and
+      shares, not single layers.
+    </figcaption>
+  </figure>
+
+  <div class="prose">
+    <p>
+      The four projections are <strong>66% of a decode layer and 79% of a prefill layer</strong>.
+      That is the invariant across devices. What changes is the residual: on the CPU,
+      <code>unattributed</code> is 21.2% of decode and 5.0% of prefill. It is layer-frame time
+      with no ATen op underneath — eager dispatch, <code>_call_impl</code>, hook checks, the
+      interpreter. It is a <em>fixed per-op cost</em>, so it is invisible during prefill and
+      large during decode. This is the CPU-specific finding that matters most for tuning: at
+      small batch, a fifth of what the CPU does per layer is not arithmetic.
+    </p>
+    <p>
+      Treat 21.2% as an upper bound: the profiler runs with
+      <code>torch_profiler_with_stack=true</code> (vLLM's default), which unwinds Python stacks
+      on every op. But the <em>shape</em> of the effect is real, and it is why CPU decode does
+      not get much faster when you quantize.
+    </p>
+  </div>
+
+  <div class="callout insight reveal">
+    <span class="callout-label">Layer 0 is not a layer property</span>
+    <p>
+      On the first decode step layer 0 takes <strong>5.41&nbsp;ms</strong> against
+      <strong>4.12&nbsp;ms</strong> for the other 27 layers — a 1.31× penalty, with every GEMM
+      in it slower. By step 19 the ratio is 0.93×: gone. This is one-time, lazy construction of
+      the oneDNN primitive for the new <code>M=1</code> shape, absorbed by whichever layer runs
+      first. <code>step_report.py</code> reports L0 separately and uses layers 1..N−1 for the
+      means, rather than letting a one-off inflate the average.
+    </p>
+  </div>
+
+  <div class="prose">
+    <p>
+      The prefill/decode asymmetry is the device-independent story. Prefill runs 512 tokens
+      through each weight matrix in one GEMM, so every weight byte is reused 512 times. Decode
+      runs one token, so the whole model is streamed from memory to multiply each weight once.
+      For this model (~0.6B params with tied embeddings) that is
+      <strong>~2.4&nbsp;GB per decode token in fp32</strong> and ~1.2&nbsp;GB in bf16. One layer
+      holds 15.7&nbsp;M weights — 15.7&nbsp;MB as INT8, 63&nbsp;MB as fp32 — read to produce a
+      single row. That is why decode latency, not arithmetic, dominates single-stream serving.
+    </p>
+  </div>
+</section>
+<section class="section wrap" id="cpu">
+  <div class="section-head">
+    <div class="section-num">06 · leg one</div>
+    <h2>The CPU profile: arithmetic that arrives as 90,960 small ops</h2>
+    <p class="lead">
+      On a CPU the host <em>is</em> the device, so a profiler's self time is wall time. That
+      makes the CPU trace the easier one to learn on: there is no clock skew, no launch queue,
+      no device idle hiding in the residual. What you see is what ran.
+    </p>
+  </div>
+
+  <div class="prose reveal">
+    <p>
+      The attributed total is <strong>3798.57&nbsp;ms</strong> of host self time over 20 steps.
+      86.9% of it is inside <code>model.forward</code>, 12.6% is <code>model.lm_head</code>,
+      and everything else — input preparation, sampling, engine glue — is under 0.5%. The
+      profile of a small model on a CPU is almost entirely the model's own operators.
+    </p>
+  </div>
+
+  <figure class="reveal fig-wide">
+    <img src="assets/fig1-stages.png" alt="Horizontal bar chart of CPU and GPU time by engine stage, showing model.forward dominating both legs and model.lm_head taking a larger share on the GPU." loading="lazy" />
+    <figcaption>
+      <strong>Stage totals, both legs (log x-axis).</strong> <code>model.forward</code> is 86.9% of CPU time
+      and 81.4% of GPU time; <code>model.lm_head</code> is 12.6% and 18.0%. The stage
+      vocabulary is the same on both sides — that is the point of section 4.
+    </figcaption>
+  </figure>
+
+  <div class="table-wrap reveal">
+    <table>
+      <caption>CPU reference trace — the op classes that matter, and what produces them.</caption>
+      <thead><tr><th>op class</th><th class="num">ms</th><th class="num">share</th><th>why it is there</th></tr></thead>
+      <tbody>
+        <tr><td class="name">linear.gate_up</td><td class="num">1014.72</td><td class="num">26.7%</td><td>fused gate+up GEMM, 1024 → 6144</td></tr>
+        <tr><td class="name">linear.qkv</td><td class="num">731.69</td><td class="num">19.3%</td><td>fused Q/K/V GEMM, 1024 → 4096</td></tr>
+        <tr><td class="name">linear.down</td><td class="num">554.57</td><td class="num">14.6%</td><td>down GEMM, 3072 → 1024</td></tr>
+        <tr><td class="name">linear.lm_head</td><td class="num">478.84</td><td class="num">12.6%</td><td>vocabulary projection, 1024 → 151,936</td></tr>
+        <tr><td class="name">linear.o_proj</td><td class="num">362.05</td><td class="num">9.5%</td><td>attention output GEMM, 2048 → 1024</td></tr>
+        <tr><td class="name">elementwise</td><td class="num">309.81</td><td class="num">8.2%</td><td>90,960 ATen ops: <code>mul</code>, <code>pow</code>, <code>sum</code>, <code>div_</code>, <code>add</code>, plus view/copy plumbing</td></tr>
+        <tr><td class="name">attention.paged</td><td class="num">211.03</td><td class="num">5.6%</td><td><code>cpu_attention_with_kv_cache</code></td></tr>
+        <tr><td class="name">rope</td><td class="num">50.56</td><td class="num">1.3%</td><td>rotary embedding</td></tr>
+        <tr><td class="name">attention.kv_write</td><td class="num">36.61</td><td class="num">1.0%</td><td><code>cpu_attn_reshape_and_cache</code></td></tr>
+        <tr><td class="name">activation</td><td class="num">27.55</td><td class="num">0.7%</td><td>SiLU × gate (SiLU is not fused into the GEMM on this path)</td></tr>
+        <tr><td class="name">python</td><td class="num">15.10</td><td class="num">0.4%</td><td>frames with no ATen child inside the model</td></tr>
+        <tr><td class="name">sampler</td><td class="num">6.04</td><td class="num">0.2%</td><td>argmax / softmax / top-k path</td></tr>
+        <tr class="total"><td class="name">total</td><td class="num">3798.57</td><td class="num">100%</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Two facts that explain most of the CPU profile</h3>
+  <div class="cards">
+    <div class="card red reveal">
+      <div class="card-kicker">fact one</div>
+      <h4>There is no <code>norm</code> row</h4>
+      <p>
+        vLLM's RMSNorm decomposes into <code>aten::pow</code>, <code>aten::mul</code>,
+        <code>aten::mean</code>, <code>aten::div_</code>. Four norms per layer across 20 steps
+        produce thousands of elementwise calls; with the unfused reshapes around attention, the
+        bucket totals <strong>90,960 ops</strong> and 8.2% of CPU time. The GPU has a fused
+        kernel; the CPU does not.
+      </p>
+    </div>
+    <div class="card blue reveal">
+      <div class="card-kicker">fact two</div>
+      <h4><code>lm_head</code> is a bandwidth floor</h4>
+      <p>
+        478.84&nbsp;ms over 20 calls = <strong>23.94&nbsp;ms per call</strong>, and it barely
+        moves between a 512-row prefill (24.38&nbsp;ms) and a 1-row decode (21–25&nbsp;ms). In
+        fp32 the weight is 1024 × 151,936 × 4&nbsp;B = <strong>622&nbsp;MB read per step</strong>
+        → about 26&nbsp;GB/s. It is memory traffic, not arithmetic.
+      </p>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>
+      Those two facts interact with deployment decisions in opposite directions. Quantizing the
+      projections helps — that is most of the FLOPs — but it does not help <code>lm_head</code>
+      if the artifact leaves the head in fp32, and it does not remove the elementwise chain,
+      because the normalization and the reshapes around attention are not quantized. The INT8
+      run in this repo buys 1.9× on prefill but only 1.13× on per-layer decode, because the
+      decode layer is dominated by attention and norm — neither is quantized — plus the fixed
+      dispatch residual.
+    </p>
+    <p>
+      The attention share is small here (5.6%) and it is small for a structural reason: a
+      512-token context with one request means the KV cache is tiny. Attention gets large only
+      when context × concurrency gets large. On this trace, decode is not attention-bound; it
+      is weight-read-bound plus dispatch-bound.
+    </p>
+  </div>
+
+  <p class="prose small muted">
+    The reference trace is one request at a time. The <strong>deployment-shaped</strong> CPU
+    run — INT8 W8A8 at concurrency 8 — is the same engine and the same 28 layers, with a batch
+    of 8 tokens per decode. The chart below is that run, and the contrast is instructive.
+  </p>
+
+  <figure class="reveal">
+    <img src="assets/fig4-step-anatomy.png" alt="Layer-by-layer stacked bars for the INT8 W8A8 concurrency-8 run: decode layers are dominated by attention and a large unattributed residual, prefill layers by gate_up." loading="lazy" />
+    <figcaption>
+      <strong>Same chart, different run — INT8 W8A8, concurrency 8.</strong> Decode is 8 tokens
+      per step (3.9&nbsp;ms/layer) and prefill is 512 (24.6&nbsp;ms/layer). Two things changed in
+      the decode composition: <code>attn.core</code> is now 35% (paged attention over eight
+      sequences' KV), and <code>quant</code> appears as its own slice. The
+      <code>unattributed</code> residual is still ~31%: batching did not make dispatch free, it
+      amortised it across eight rows. This is the deployment-shaped run, not the reference trace
+      used for the comparison.
+    </figcaption>
+  </figure>
+
+  <div class="prose">
+    <p>
+      A CPU flame graph is read left to right: horizontal width is duration, nesting is the call
+      stack, and the <em>gaps</em> between ATen ops are as important as the ops. Those gaps are
+      the <code>unattributed</code> 21.2% of a decode layer — the profiler's own stack unwind,
+      <code>_call_impl</code>, hook checks, and the Python interpreter moving between calls.
+      When someone says “the CPU is slow at small batch”, this is the part they mean, and it is
+      fixed by batching (more rows per dispatch) rather than by a faster GEMM.
+    </p>
+  </div>
+
+  <div class="callout note reveal">
+    <span class="callout-label">What the CPU total is not</span>
+    <p>
+      The 3798.57&nbsp;ms is <em>attributed work</em>, not the run's wall time and not a
+      serving-throughput measurement. The profiled window also contains 27.9&nbsp;s of bare
+      Python self time — asyncio, queue waits, profiler bookkeeping — which is deliberately
+      excluded. The analyzer prints that excluded total next to the attributed total so the
+      gap stays visible.
+    </p>
+  </div>
+</section>
+<section class="section wrap" id="gpu">
+  <div class="section-head">
+    <div class="section-num">07 · leg two</div>
+    <h2>The GPU profile: 6 milliseconds of work inside a 20-millisecond step</h2>
+    <p class="lead">
+      The same code runs. The same annotation wraps the same 28 layers. But on the GPU the
+      columns stop meaning the same thing: the step you measure on the host is not the work the
+      device does, and the difference is the finding.
+    </p>
+  </div>
+
+  <div class="prose reveal">
+    <p>
+      The GPU leg's attributed device time is <strong>138.97&nbsp;ms</strong>: 24.08&nbsp;ms
+      for the 512-token prefill and <strong>6.05&nbsp;ms</strong> for each of the 19 decodes.
+      The host-side annotation for those same decode steps is <strong>19.6–26.0&nbsp;ms</strong>.
+      In other words, the host spends about 20&nbsp;ms per step to get 6&nbsp;ms of device work
+      done. This is a small model on a fast device: the host cannot enqueue fast enough to keep
+      the GPU busy, so the GPU idles between kernels.
+    </p>
+  </div>
+
+  <figure class="reveal">
+    <img src="assets/fig-step-gpu-ref.png" alt="Stacked bars for GPU prefill and decode steps grouped by engine phase, with the forward bar much smaller than the host annotation, illustrating launch-bound decode." loading="lazy" />
+    <figcaption>
+      <strong>Every layer: device time plus the host-only residual.</strong> Decode bars are
+      ~0.7&nbsp;ms, and purple (<code>unattributed</code>) is 74.2% of that — each layer's host
+      span contains almost no kernel. Prefill bars are ~0.6&nbsp;ms and almost entirely device
+      work: at 512 tokens the device is the bottleneck, so the launch gaps disappear into the
+      arithmetic. Note the different x scales; layer 0's first-decode bar is the 10× per-shape
+      setup.
+    </figcaption>
+  </figure>
+
+  <div class="table-wrap reveal">
+    <table>
+      <caption>GPU reference trace — per-layer device time and the host residual. Decode = 1 token; prefill = 512.</caption>
+      <thead><tr><th>component</th><th class="num">decode ms</th><th class="num">share</th><th class="num">prefill ms</th><th class="num">share</th></tr></thead>
+      <tbody>
+        <tr><td class="name">mlp.gate_up</td><td class="num">0.05</td><td class="num">8.1%</td><td class="num"><strong>0.24</strong></td><td class="num"><strong>30.3%</strong></td></tr>
+        <tr><td class="name">attn.qkv</td><td class="num">0.04</td><td class="num">5.4%</td><td class="num">0.18</td><td class="num">22.8%</td></tr>
+        <tr><td class="name">mlp.down</td><td class="num">0.03</td><td class="num">4.2%</td><td class="num">0.13</td><td class="num">15.8%</td></tr>
+        <tr><td class="name">attn.o_proj</td><td class="num">0.02</td><td class="num">2.9%</td><td class="num">0.09</td><td class="num">10.8%</td></tr>
+        <tr><td class="name">attn.core</td><td class="num">0.02</td><td class="num">3.5%</td><td class="num">0.10</td><td class="num">11.9%</td></tr>
+        <tr><td class="name">norm</td><td class="num">0.01</td><td class="num">1.1%</td><td class="num">0.04</td><td class="num">4.7%</td></tr>
+        <tr><td class="name">mlp.act</td><td class="num">0.00</td><td class="num">0.3%</td><td class="num">0.01</td><td class="num">1.7%</td></tr>
+        <tr><td class="name">rope</td><td class="num">0.00</td><td class="num">0.3%</td><td class="num">0.02</td><td class="num">1.9%</td></tr>
+        <tr><td class="name">unattributed <span class="muted">(host-only residual)</span></td><td class="num">0.49</td><td class="num"><strong>74.2%</strong></td><td class="num">0.00</td><td class="num">0.0%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn reveal">
+    <span class="callout-label">Reading this table correctly</span>
+    <p>
+      The attributed rows are <strong>device time</strong>. The <code>unattributed</code> row is
+      <strong>host span with no device kernel under it</strong> — launch gaps and Python. It is
+      shown in the same column because that is where the time went, not because it is device
+      work. Percentages are shares of that mixed per-layer total. Do not add the two kinds of
+      milliseconds together and call the result “device time”; section 8 does the device-only
+      sums.
+    </p>
+  </div>
+
+  <div class="prose">
+    <p>
+      Even so, the shape is clear. The projections are the device work (0.05, 0.04, 0.03,
+      0.02&nbsp;ms per layer), and <strong>74.2% of the layer's host span contains no kernel at
+      all</strong>. The host is enqueueing the next launch while the device is still draining
+      the previous one. At 0.6B scale on a 4060, that is the dominant fact about decode: the
+      GPU is not slow, it is underfed.
+    </p>
+    <p>
+      Kernel counts make the same point from the other side. Over 20 steps there are
+      <strong>2,260 fused RMSNorm kernels</strong> (four per layer, 2,240, plus 20 final
+      norms), <strong>1,092 attention kernels</strong>, and <strong>560 calls of each
+      projection</strong> (28 layers × 20 steps). Each of those is a launch; each launch is a
+      host-side operation before it is a device-side one.
+    </p>
+  </div>
+
+  <h3>Two clocks: the <code>lm_head</code> example</h3>
+  <div class="prose">
+    <p>
+      The step table's <code>logits</code> column reads <strong>0.06&nbsp;ms</strong> on the GPU
+      — and that is a host span, not the cost of the vocabulary projection. The device time for
+      <code>lm_head</code> is <strong>1.25&nbsp;ms per call</strong> (25.06&nbsp;ms over 20
+      steps). The host fires the kernel and moves on; the kernel finishes later. If you read the
+      0.06 as “lm_head is cheap on GPU”, you have read the wrong clock.
+    </p>
+    <p>
+      This is the single most important skill in reading an async trace: for every number, ask
+      <em>which clock produced it</em>. <code>device_ms</code> answers “where the FLOPs went”.
+      <code>host_ms</code> answers “where the Python went”. They are never summed, and a step's
+      host span can be longer or shorter than the device work inside it.
+    </p>
+  </div>
+
+  <div class="callout insight reveal">
+    <span class="callout-label">The bandwidth cross-check</span>
+    <p>
+      Decode streams ~1.2&nbsp;GB of bf16 weights per token. 1.2&nbsp;GB ÷ 6.05&nbsp;ms ≈
+      <strong>197&nbsp;GB/s</strong> against a peak of roughly 272&nbsp;GB/s on this part — the
+      right order of magnitude for a bandwidth-bound decode. The CPU's 2.4&nbsp;GB ÷ 116.6&nbsp;ms
+      ≈ 21&nbsp;GB/s. A compute-bound explanation would predict the opposite ordering of
+      prefill and decode; it does not fit.
+    </p>
+  </div>
+
+  <h3>What the GPU profile teaches that the CPU profile cannot</h3>
+  <div class="cards">
+    <div class="card teal reveal">
+      <h4>Fusion changes the vocabulary</h4>
+      <p>
+        RMSNorm is a real kernel on the GPU: 2,260 of them, 3.5% of device time. On the CPU it
+        is a chain of elementwise ops, 8.2% of host time. Same math, different decomposition.
+        The two percentages do not answer the same question.
+      </p>
+    </div>
+    <div class="card red reveal">
+      <h4>Layer 0 costs 10×</h4>
+      <p>
+        First decode step: 6.64&nbsp;ms for layer 0 against 0.66&nbsp;ms for the other 27 — a
+        10.09× penalty. By step 19 it is 1.22×. This is first-launch cost at the new
+        <code>M=1</code> shape, and it matters for time-to-first-token, not steady-state
+        throughput.
+      </p>
+    </div>
+    <div class="card orange reveal">
+      <h4>Attention's share rises by shrinking less</h4>
+      <p>
+        13.44&nbsp;ms of GPU time, 9.7% of the total, against 211.03&nbsp;ms on the CPU (5.6%).
+        The gain is 15.7× — the smallest ratio in the table. Attention did not get more
+        expensive; everything else got 29× cheaper.
+      </p>
+    </div>
+    <div class="card purple reveal">
+      <h4>Eager is a correctness condition</h4>
+      <p>
+        Kernel attribution works because kernels are matched to their launch point in order.
+        CUDA graphs replace N launches with one replay node, so every per-op number becomes a
+        number about <code>cudaGraphLaunch</code>. That is why R6 exists.
+      </p>
+    </div>
+  </div>
+</section>
+<section class="section wrap" id="compare">
+  <div class="section-head">
+    <div class="section-num">08 · side by side</div>
+    <h2>What the two profiles agree and disagree about</h2>
+    <p class="lead">
+      This is the whole comparison in one table, then six findings that the table alone cannot
+      tell you. The rule for reading it: percentages answer “what share of <em>this device's</em>
+      time”, ratios answer “how the same work scales”. Never use one as a proxy for the other.
+    </p>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table style="min-width:700px;">
+      <caption>Attributed work, both legs. CPU = host self time; GPU = summed kernel time. Same 20 steps, same weights.</caption>
+      <thead>
+        <tr>
+          <th>op class</th>
+          <th class="num">cpu ms</th><th class="num">cpu %</th>
+          <th class="num">gpu ms</th><th class="num">gpu %</th>
+          <th class="num">cpu/gpu</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="name">linear.gate_up</td><td class="num">1014.72</td><td class="num">26.7</td><td class="num">35.34</td><td class="num">25.4</td><td class="num"><strong>28.7×</strong></td></tr>
+        <tr><td class="name">linear.qkv</td><td class="num">731.69</td><td class="num">19.3</td><td class="num">23.94</td><td class="num">17.2</td><td class="num"><strong>30.6×</strong></td></tr>
+        <tr><td class="name">linear.down</td><td class="num">554.57</td><td class="num">14.6</td><td class="num">18.32</td><td class="num">13.2</td><td class="num"><strong>30.3×</strong></td></tr>
+        <tr><td class="name">linear.lm_head</td><td class="num">478.84</td><td class="num">12.6</td><td class="num">25.06</td><td class="num">18.0</td><td class="num"><strong>19.1×</strong></td></tr>
+        <tr><td class="name">linear.o_proj</td><td class="num">362.05</td><td class="num">9.5</td><td class="num">12.55</td><td class="num">9.0</td><td class="num"><strong>28.9×</strong></td></tr>
+        <tr><td class="name">elementwise</td><td class="num">309.81</td><td class="num">8.2</td><td class="num">—</td><td class="num">—</td><td class="num muted">—</td></tr>
+        <tr><td class="name">attention.paged</td><td class="num">211.03</td><td class="num">5.6</td><td class="num">13.44</td><td class="num">9.7</td><td class="num"><strong>15.7×</strong></td></tr>
+        <tr><td class="name">rope</td><td class="num">50.56</td><td class="num">1.3</td><td class="num">1.46</td><td class="num">1.1</td><td class="num">34.5×</td></tr>
+        <tr><td class="name">attention.kv_write</td><td class="num">36.61</td><td class="num">1.0</td><td class="num">1.29</td><td class="num">0.9</td><td class="num">28.3×</td></tr>
+        <tr><td class="name">activation</td><td class="num">27.55</td><td class="num">0.7</td><td class="num">1.26</td><td class="num">0.9</td><td class="num">21.9×</td></tr>
+        <tr><td class="name">norm</td><td class="num">—</td><td class="num">—</td><td class="num">4.93</td><td class="num">3.5</td><td class="num muted">—</td></tr>
+        <tr><td class="name">python <span class="muted">(plumbing)</span></td><td class="num">15.10</td><td class="num">0.4</td><td class="num">1.37</td><td class="num">1.0</td><td class="num">11.0×</td></tr>
+        <tr><td class="name">sampler</td><td class="num">6.04</td><td class="num">0.2</td><td class="num">—</td><td class="num">—</td><td class="num muted">—</td></tr>
+        <tr class="total"><td class="name">total</td><td class="num">3798.57</td><td class="num">100</td><td class="num">138.97</td><td class="num">100</td><td class="num">27.3×</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout note reveal">
+    <span class="callout-label">Why some cells are em-dashes</span>
+    <p>
+      They are not missing data; the bucket does not exist on that leg.
+      <code>elementwise</code> is where the CPU's unfused RMSNorm and reshape plumbing land; on
+      the GPU those are fused kernels, counted under <code>norm</code> or inside attention.
+      <code>sampler</code> is a host-side op class and is not part of the device-kernel sum.
+      A dash means “different decomposition”, not “zero work”.
+    </p>
+  </div>
+
+  <figure class="reveal">
+    <img src="assets/fig2-op-classes.png" alt="Side-by-side bar chart of op-class shares on CPU and GPU, highlighting that projections dominate both while elementwise and norm appear only on one side." loading="lazy" />
+    <figcaption>
+      <strong>The same buckets, different sizes.</strong> The projection mix is nearly the same
+      on both legs. The buckets that appear on only one side are the decomposition difference:
+      CPU <code>elementwise</code> vs GPU <code>norm</code>.
+    </figcaption>
+  </figure>
+
+  <h3>Finding 1 — the device changes the cost by 29×, not the shape of the work</h3>
+  <div class="prose">
+    <p>
+      The projection mix is almost identical: <code>gate_up</code> is the largest on both
+      (26.7% / 25.4%), then qkv, down, o_proj, with <code>lm_head</code> as a separate stage.
+      The per-projection ratios cluster tightly at <strong>28.7–30.6×</strong>. That is what you
+      expect if the work is the same arithmetic and the device is simply a different
+      multiplier: vLLM dispatches the same four GEMMs per layer either way, and nothing about
+      scheduling or batching moved.
+    </p>
+    <p>
+      The one projection that escapes the cluster is <code>lm_head</code> at
+      <strong>19.1×</strong>, and the reason is in its shape. It is the only GEMM whose output is
+      the vocabulary (151,936 wide): on the GPU it is bandwidth-bound, because each token streams
+      <code>151936 × 1024 × 2&nbsp;B ≈ 311&nbsp;MB</code> of weights, while the projections stream
+      12–25&nbsp;MB each. The CPU's fp32 weights are twice the bytes, but its GEMMs are
+      compute-limited rather than bandwidth-limited, so it loses proportionally less on this one.
+    </p>
+  </div>
+
+  <figure class="reveal">
+    <img src="assets/fig3-linear.png" alt="Per-projection CPU and GPU time and speedup ratios, with lm_head as the outlier at 19.1 times." loading="lazy" />
+    <figcaption>
+      <strong>The projection cluster and its one outlier.</strong> Five GEMMs, five ratios, one
+      structural exception. A ratio that breaks the cluster is a hint about which resource is
+      binding, not noise to be averaged away.
+    </figcaption>
+  </figure>
+
+  <h3>Finding 2 — decode is a weight-streaming problem; prefill is not</h3>
+  <div class="table-wrap reveal">
+    <table>
+      <caption>Per-token cost. CPU rows are host self time; GPU rows are kernel time.</caption>
+      <thead><tr><th></th><th class="num">CPU</th><th class="num">GPU</th></tr></thead>
+      <tbody>
+        <tr><td class="name">prefill forward (512 tokens)</td><td class="num">1386.2 ms</td><td class="num">24.1 ms</td></tr>
+        <tr><td class="name">prefill per token</td><td class="num">2.71 ms</td><td class="num">0.047 ms</td></tr>
+        <tr><td class="name">decode forward (1 token)</td><td class="num">116.6 ms</td><td class="num">6.05 ms</td></tr>
+        <tr><td class="name">prefill / decode cost per token</td><td class="num">43× cheaper</td><td class="num">129× cheaper</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>
+      Both devices show the same structural fact: decoding one token costs far more than
+      processing one prefill token. Prefill runs 512 tokens through each weight matrix in one
+      GEMM, so every weight byte is reused 512 times; decode runs one token, so the whole model
+      is streamed from memory to multiply each weight once.
+    </p>
+    <p>
+      The measured times are consistent with that. 1.2&nbsp;GB / 6.05&nbsp;ms ≈
+      <strong>197&nbsp;GB/s</strong> on the GPU (against ~272&nbsp;GB/s peak on this part), and
+      2.4&nbsp;GB / 116.6&nbsp;ms ≈ <strong>21&nbsp;GB/s</strong> on the CPU. A compute-bound
+      explanation would predict the opposite ordering of prefill and decode, so the asymmetry is
+      the device-independent story — and it is why decode latency dominates single-stream
+      serving.
+    </p>
+  </div>
+
+  <h3>Finding 3 — attention gets a bigger share on the GPU by getting smaller</h3>
+  <div class="prose">
+    <p>
+      <code>attention.paged</code> is 9.7% of GPU work and 5.6% of CPU work, which reads as “the
+      GPU spends more on attention”. It does not: 13.44&nbsp;ms against 211.03&nbsp;ms, a
+      <strong>15.7×</strong> gain — the smallest ratio in the table. The share rises because
+      everything else shrank by ~29× while attention shrank by ~16×, so attention's slice grew.
+      Per layer it is 7.3% of CPU decode time and 3.5% of GPU decode time.
+    </p>
+    <p>
+      This is the general trap with share tables on two devices, and the reason
+      <code>compare_runs.py</code> prints both columns. A share is a ratio to a moving
+      denominator; a ratio to the other device is the thing you actually want when asking “did
+      this get faster”.
+    </p>
+  </div>
+
+  <h3>Finding 4 — RMSNorm exists on the GPU and is arithmetic on the CPU</h3>
+  <div class="prose">
+    <p>
+      There is no <code>norm</code> row for the CPU at all, and 8.2% of CPU time sits in
+      <code>elementwise</code> — 90,960 ATen ops (<code>aten::mul</code>, <code>aten::pow</code>,
+      <code>aten::sum</code>, <code>aten::div_</code>, <code>aten::add</code>, plus view/slice/copy
+      plumbing). The GPU has fused <code>_C::rms_norm</code> and
+      <code>_C::fused_add_rms_norm</code> kernels — <strong>2,260</strong> of them, 3.5%.
+    </p>
+    <p>
+      The CPU path has no fused RMSNorm op, so the layer's normalization arrives as a chain of
+      elementwise calls, and the equally unfused reshapes around attention add to the same
+      bucket. Same math, different decomposition: the GPU's 3.5% and the CPU's 8.2% are not
+      comparable as “how expensive is normalization”, only as “how much of each device's time
+      lands in that bucket”.
+    </p>
+  </div>
+
+  <h3>Finding 5 — frontend and engine glue are noise on both, but not the same noise</h3>
+  <div class="prose">
+    <p>
+      Engine-core glue (sample + schedule + postproc) is <strong>1.45&nbsp;ms/step</strong> on
+      the CPU and <strong>0.64&nbsp;ms/step</strong> on the GPU. Its <em>share</em> is higher on
+      the GPU (3.1% vs 0.7%) because the model forward got so much cheaper; in absolute terms
+      the GPU is still the faster engine core. Neither device is anywhere near frontend-bound:
+      prompt handling and detokenization do not appear in the traced window at all.
+    </p>
+    <p>
+      The lesson is not “the scheduler is free”. It is that a fixed host cost looks negligible
+      next to 116&nbsp;ms of CPU math and looks like 3% next to 20&nbsp;ms of GPU stepping. If
+      you shrink the model or the batch further, that fixed cost keeps its milliseconds while
+      its share grows.
+    </p>
+  </div>
+
+  <h3>Finding 6 — first-step, per-shape cost is real on both, and much bigger on the GPU</h3>
+  <div class="table-wrap reveal">
+    <table>
+      <caption>Layer 0 of the first decode step vs the other 27 layers.</caption>
+      <thead><tr><th></th><th class="num">L0</th><th class="num">other layers</th><th class="num">ratio</th></tr></thead>
+      <tbody>
+        <tr><td class="name">CPU</td><td class="num">5.41 ms</td><td class="num">4.12 ms</td><td class="num">1.31×</td></tr>
+        <tr><td class="name">GPU</td><td class="num">6.64 ms</td><td class="num">0.66 ms</td><td class="num"><strong>10.09×</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p>
+      By step 19 the gap is gone on the CPU (0.93×) and down to 1.22× on the GPU. This is
+      one-time per-shape setup at the new <code>M=1</code> shape — on the CPU a oneDNN primitive
+      is built, on the GPU the first launch of these kernels happens. It is why
+      <code>step_report.py</code> excludes L0 from the layer means and reports it separately
+      instead of letting it inflate the average.
+    </p>
+    <p>
+      On the GPU it is also the difference between “28 layers cost 0.66&nbsp;ms each” and “the
+      first one costs ten times that”, which matters if you are looking at time-to-first-token
+      rather than steady-state throughput.
+    </p>
+  </div>
+
+  <div class="callout trap reveal">
+    <span class="callout-label">The ratio is not a serving number</span>
+    <p>
+      27.3× is the ratio of two <em>attributed work</em> sums: CPU host self time and GPU kernel
+      time. It is not a throughput ratio. The GPU leg is eager (no CUDA graphs), profiled with
+      stack unwinding and shape recording, and driven by four serial requests. The honest claim
+      is about composition: on this window, for this model, the GPU's device work is 27×
+      smaller and made of the same parts.
+    </p>
+  </div>
+</section>
+<style>
+  /* Case-study layout (local to the attribution section) */
+  .case {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 55%), var(--bg-card);
+    padding: 1.05rem 1.2rem 1.15rem;
+    margin: var(--space-md) 0;
+  }
+  .case-top {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.65rem;
+  }
+  .case-id {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.1em;
+    color: var(--rh-red);
+    border: 1px solid rgba(238,0,0,0.35);
+    border-radius: 4px;
+    padding: 0.12rem 0.4rem;
+    flex: 0 0 auto;
+  }
+  .case h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    flex: 1 1 240px;
+  }
+  .case-flow {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem 1.4rem;
+    margin-top: 0.75rem;
+    padding-top: 0.8rem;
+    border-top: 1px dashed rgba(255,255,255,0.08);
+  }
+  .case-flow > div { min-width: 0; }
+  .case-flow dt {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.2rem;
+  }
+  .case-flow dd { margin: 0; font-size: 0.85rem; line-height: 1.6; }
+  .case-flow code { white-space: normal; overflow-wrap: anywhere; }
+  @media (max-width: 700px) { .case-flow { grid-template-columns: 1fr; } }
+</style>
+
+<section class="section wrap" id="attribution">
+  <div class="section-head">
+    <div class="section-num">09 · the craft</div>
+    <h2>Attribution is where profiles go wrong quietly</h2>
+    <p class="lead">
+      A trace does not label its own work. Every number on this page is the output of a rule
+      about which frame, shape or launch a piece of time belongs to — and a wrong rule produces
+      a plausible number that survives every sanity check except the one you did not run.
+    </p>
+  </div>
+
+  <div class="prose reveal">
+    <p>
+      These six cases are not hypothetical. Each one produced a chart that looked reasonable
+      and was wrong, and each is now pinned by a test. They are the best material in the repo
+      for learning to read a profile, because the failure mode is always the same: the
+      classifier does not crash, it just puts the time somewhere defensible.
+    </p>
+  </div>
+
+  <div class="case reveal">
+    <div class="case-top">
+      <span class="case-id">01</span>
+      <h4>38.5% of a GPU decode trace landed in <code>other</code></h4>
+      <span class="pill red">launch matching</span>
+    </div>
+    <p style="font-size:0.89rem;">
+      The GPU leg attributed less than two thirds of its device time. The rest was unmatched —
+      the tell-tale sign that kernels had no enclosing launch op, not that the model did
+      something unknown.
+    </p>
+    <dl class="case-flow">
+      <div><dt>What was wrong</dt><dd>PyTorch records its own launches as <code>cuda_runtime</code>, but cuBLAS — where every GEMM on the GPU leg comes from — launches through the driver API as <code>cuda_driver</code> (<code>cuLaunchKernel</code>). The launcher set did not include <code>cuda_driver</code>, so those kernels were orphaned.</dd></div>
+      <div><dt>Fix</dt><dd>Treat <code>cuda_driver</code>, <code>Runtime</code> and <code>gpu_user_annotation</code> as launch points too. The kernel is then correlated to the op that requested it, and the 38.5% becomes the projections.</dd></div>
+      <div><dt>Lesson</dt><dd><code>other</code> is a health metric. If it exceeds ~10%, the taxonomy is wrong for this commit and must be fixed before drawing conclusions. The workload is never the explanation.</dd></div>
+      <div><dt>Pinned by</dt><dd><code>test_analyze_trace.py</code> — a kernel launched by <code>cuLaunchKernel</code> must resolve to its <code>cuda_driver</code> parent.</dd></div>
+    </dl>
+  </div>
+
+  <div class="case reveal">
+    <div class="case-top">
+      <span class="case-id">02</span>
+      <h4>43.7 of 139.3 ms of decode device time was classed “python”</h4>
+      <span class="pill red">kernel naming</span>
+    </div>
+    <p style="font-size:0.89rem;">
+      At <code>M=1</code> every projection is a matrix-vector product, and cuBLAS emits a kernel
+      named <code>internal::gemvx::kernel</code>. The linear matcher looked for
+      <code>gemm</code> — which is not in the name. The single largest slice of decode time fell
+      through to <code>python</code>.
+    </p>
+    <dl class="case-flow">
+      <div><dt>What was wrong</dt><dd>“GEMM” is a shape regime, not a word that appears in every kernel name. Decode changes the kernel family, so a matcher tuned on prefill silently mislabels steady state — the part you most want to measure.</dd></div>
+      <div><dt>Fix</dt><dd>Add <code>gemv</code> to the linear markers, and let the enclosing host op's shape resolve which projection it is. The test uses the real mangled name: <code>std::enable_if&lt;!(false), void&gt;::type internal::gemvx::kernel&lt;int, int, ...&gt;</code>.</dd></div>
+      <div><dt>Lesson</dt><dd>Op names encode the shape regime. When a bucket's share jumps between prefill and decode, check whether the kernel was renamed, not whether the work changed.</dd></div>
+    </dl>
+  </div>
+
+  <div class="case reveal">
+    <div class="case-top">
+      <span class="case-id">03</span>
+      <h4>Every projection came out <code>linear[1024x1024]</code></h4>
+      <span class="pill red">dims convention</span>
+    </div>
+    <p style="font-size:0.89rem;">
+      The shapes were square, identical, and wrong. <code>aten::mm</code> had been parsed like
+      <code>aten::linear</code>: take <code>dims[1][0]</code> as <code>K</code>. For a matmul,
+      <code>dims[1]</code> is <code>mat2 = (K, N)</code>, so that reads <code>K</code> twice.
+    </p>
+    <dl class="case-flow">
+      <div><dt>What was wrong</dt><dd>Two layouts coexist. <code>linear</code> stores weight as <code>(N, K)</code>; <code>mm/matmul/addmm</code> store <code>mat1 (M, K)</code>, <code>mat2 (K, N)</code>. The analyzer guessed one convention instead of selecting it from the op name.</dd></div>
+      <div><dt>Fix</dt><dd>Use <code>dims[-2][-1]</code> and <code>dims[-1][-1]</code> for the mm family (addmm puts the 1-D bias first). Pinned by <code>test_aten_mm_uses_the_mat2_layout</code> with dims copied from a real trace.</dd></div>
+      <div><dt>Lesson</dt><dd>The dangerous wrong answer is the plausible one. Unknown shapes fall back to <code>linear[KxN]</code> and are visible; a square shape looks like a legitimate result and silences the fallback.</dd></div>
+    </dl>
+  </div>
+
+  <div class="case reveal">
+    <div class="case-top">
+      <span class="case-id">04</span>
+      <h4><code>act_and_mul</code> was invisible to the activation matcher</h4>
+      <span class="pill red">custom kernels</span>
+    </div>
+    <p style="font-size:0.89rem;">
+      The GPU's SiLU × gate kernel is
+      <code>vllm::act_and_mul_kernel&lt;c10::BFloat16, ...&gt;</code>. It contains no
+      <code>aten::</code> prefix, so a matcher built around <code>aten::silu</code> missed it,
+      and the work fell into <code>elementwise</code> or <code>python</code>.
+    </p>
+    <dl class="case-flow">
+      <div><dt>What was wrong</dt><dd>vLLM's custom kernels do not follow ATen naming. <code>silu_and_mul</code>, <code>act_and_mul</code> and <code>swiglu</code> are the real spellings; matching only the ATen family covers the CPU path and not the GPU one.</dd></div>
+      <div><dt>Fix</dt><dd>Match the vLLM spellings in the activation classifier, and test with the demangled kernel name from a real trace.</dd></div>
+      <div><dt>Lesson</dt><dd>When an op class exists on one device and vanishes on the other, first suspect the name space, then the math.</dd></div>
+    </dl>
+  </div>
+
+  <div class="case reveal">
+    <div class="case-top">
+      <span class="case-id">05</span>
+      <h4>35.8% of prefill time was a bare <code>linear</code> with no layer</h4>
+      <span class="pill red">frame nesting</span>
+    </div>
+    <p style="font-size:0.89rem;">
+      Kernels launched through vLLM's compile wrapper skip <code>nn.Module.__call__</code>.
+      There is no <code>nn.Module: QKVParallelLinear</code> frame above them, so module-based
+      attribution had nothing to grab, and a third of prefill collapsed into one unnamed
+      <code>linear</code> bucket.
+    </p>
+    <dl class="case-flow">
+      <div><dt>What was wrong</dt><dd>The module frame is a convenience, not ground truth. The <em>enclosing host op</em> still carries the shape — and the shape is what identifies qkv vs o_proj vs gate_up.</dd></div>
+      <div><dt>Fix</dt><dd>Resolve the op class from the launching op's name and <code>Input Dims</code>, not from the module frame. <code>work_items</code> uses the launcher's enclosing op for exactly this reason.</dd></div>
+      <div><dt>Lesson</dt><dd>Instrumentation changes the call stack. Any wrapper that bypasses <code>__call__</code> is invisible to hook-based tools; fall back to the op, which is always there.</dd></div>
+    </dl>
+  </div>
+
+  <div class="case reveal">
+    <div class="case-top">
+      <span class="case-id">06</span>
+      <h4>The profiled prefill scheduled 480 tokens, not 512</h4>
+      <span class="pill red">workload verification</span>
+    </div>
+    <p style="font-size:0.89rem;">
+      The annotation said <code>execute_context_1(480)_generation_0(0)</code> on a 512-token
+      prompt. Two 16-token blocks had survived the prefix-cache reset from the warmup request,
+      so the traced prefill was 6% smaller than the workload claimed.
+    </p>
+    <dl class="case-flow">
+      <div><dt>What was wrong</dt><dd>The harness reset the prefix cache, but on the GPU the reset did not take effect. Warmup and measurement shared a prompt prefix; the cache did what it is designed to do.</dd></div>
+      <div><dt>Fix</dt><dd>The warmup now carries a unique preamble, and <code>profile_run.sh</code> reads the scheduler's context-token count back from the trace. A mismatch fails loudly instead of skewing the comparison by 6%.</dd></div>
+      <div><dt>Lesson</dt><dd>Verify the annotation against the workload, not only against the GEMM. The token count matching <code>M</code> proves the trace is internally consistent; it does not prove it captured the run you intended.</dd></div>
+    </dl>
+  </div>
+
+  <div class="callout insight reveal">
+    <span class="callout-label">The general pattern</span>
+    <p>
+      Every case above is a silent misattribution, not a crash. The defence is procedural:
+      make the unmatched bucket loud (<code>other</code>), make unknown shapes visible
+      (<code>linear[KxN]</code>), test the classifier with names and dims copied from real
+      traces, and cross-check the annotation against the workload. The unit tests in
+      <code>analysis/test_*.py</code> exist because each of these rules was once a bug.
+    </p>
+  </div>
+</section>
+<section class="section wrap" id="reproduce">
+  <div class="section-head">
+    <div class="section-num">10 · reproduce</div>
+    <h2>Every number here has a command behind it</h2>
+    <p class="lead">
+      The traces themselves are not committed — they are large and machine-specific. What is
+      committed is the code that produces them, the merged CSV, and the figures. Three commands
+      per leg, plus two analysis steps.
+    </p>
+  </div>
+
+  <div class="code-label"><span>1 — capture both reference legs</span><span>same weights, device-optimal dtype</span></div>
+<pre><code><span class="c"># CPU: builds vLLM from source with VLLM_TARGET_DEVICE=cpu (no CPU wheels exist)</span>
+DEVICE=cpu VARIANT=ref harness/profile_run.sh   <span class="c"># -&gt; traces/cpu-ref-profile/rank0*</span>
+
+<span class="c"># GPU: precompiled wheel is fine; enforce-eager + single process are set by the harness</span>
+DEVICE=gpu VARIANT=ref harness/profile_run.sh   <span class="c"># -&gt; traces/gpu-ref-profile/rank0*</span></code></pre>
+
+  <div class="code-label"><span>2 — merge and plot</span><span>the 13-row table and figures 1–3</span></div>
+<pre><code>analysis/compare_runs.py \
+    --cpu results/cpu-ref-profile-stages.csv \
+    --gpu results/gpu-ref-profile-stages.csv \
+    --out results/profile-compare.csv
+
+analysis/plot_compare.py \
+    results/cpu-ref-profile-stages.csv \
+    results/gpu-ref-profile-stages.csv --out figures/profile</code></pre>
+
+  <div class="code-label"><span>3 — open one step, layer by layer</span><span>figures 4, CPU and GPU anatomy</span></div>
+<pre><code>source harness/env.sh
+"$ANALYSIS_PY" analysis/step_report.py \
+    --trace "traces/cpu-ref-profile/rank0*.json.gz" \
+    --fig figures/fig-step-cpu-ref.png
+
+"$ANALYSIS_PY" analysis/step_report.py \
+    --trace "traces/gpu-ref-profile/rank0*.json.gz" \
+    --fig figures/fig-step-gpu-ref.png</code></pre>
+
+  <div class="callout note reveal">
+    <span class="callout-label">Defaults the harness applies</span>
+    <p>
+      <code>PROFILE_REQUESTS=4</code>, <code>PROFILE_PROMPT_TOKENS=512</code>,
+      <code>PROFILE_MAX_TOKENS=128</code>, <code>PROFILE_ITERS=20</code>; one warmup request
+      with a unique preamble; <code>ENFORCE_EAGER=1</code>,
+      <code>VLLM_ENABLE_V1_MULTIPROCESSING=0</code>,
+      <code>VLLM_USE_V2_MODEL_RUNNER=0</code>, <code>torch_profiler_record_shapes=true</code>,
+      <code>with_stack=true</code>. GPU start is refused above 80&nbsp;°C.
+    </p>
+  </div>
+
+  <h3>Where each claim comes from</h3>
+  <div class="table-wrap reveal">
+    <table>
+      <caption>Source map. Docs are the long form; this page is the guided tour.</caption>
+      <thead><tr><th>what</th><th>where</th></tr></thead>
+      <tbody>
+        <tr><td class="name">request path / two runners</td><td><code>docs/01-architecture.md</code></td></tr>
+        <tr><td class="name">R1–R10, threats to validity</td><td><code>docs/02-methodology.md</code></td></tr>
+        <tr><td class="name">stage + op-class taxonomy</td><td><code>docs/03-stage-taxonomy.md</code>, <code>analysis/stages.py</code></td></tr>
+        <tr><td class="name">step tables, phases, conc8</td><td><code>docs/04-request-lifecycle.md</code>, <code>analysis/step_report.py</code></td></tr>
+        <tr><td class="name">comparison + six findings</td><td><code>docs/05-cpu-vs-gpu-profile.md</code>, <code>results/profile-compare.csv</code></td></tr>
+        <tr><td class="name">kernel/launch correlation</td><td><code>analysis/analyze_trace.py</code></td></tr>
+        <tr><td class="name">harness conditions</td><td><code>harness/profile_run.sh</code>, <code>harness/env.sh</code></td></tr>
+        <tr><td class="name">classification tests</td><td><code>analysis/test_stages.py</code>, <code>analysis/test_analyze_trace.py</code></td></tr>
+        <tr><td class="name">raw per-run CSVs</td><td><code>results/cpu-ref-profile-stages.csv</code>, <code>results/gpu-ref-profile-stages.csv</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn reveal">
+    <span class="callout-label">Do not read the requests file as latency</span>
+    <p>
+      The first request after <code>start_profile</code> takes <strong>34.752&nbsp;s</strong> on
+      the CPU and <strong>14.225&nbsp;s</strong> on the GPU, against 17.956–19.457&nbsp;s and
+      1.383–1.400&nbsp;s for the next three identical requests. That gap is profiler startup —
+      kineto initialization and frame symbolization — and it lands outside the annotated steps,
+      which is why the trace's per-step times look normal. It is a startup cost, not a model
+      latency.
+    </p>
+  </div>
+</section>
+
+<section class="section wrap" id="limits">
+  <div class="section-head">
+    <div class="section-num">11 · scope</div>
+    <h2>What this study does not say</h2>
+    <p class="lead">
+      A profile is a measurement of a specific run under a specific set of conditions. The
+      shape of the result generalises; the constants do not. These are the caveats that travel
+      with every number on this page.
+    </p>
+  </div>
+
+  <div class="cards">
+    <div class="card red reveal">
+      <h4>Different metrics</h4>
+      <p>
+        CPU self time and GPU kernel time both answer “what did this op cost on this device”,
+        but they are not the same physical measurement. Do not read the 27.3× total as a
+        serving-throughput ratio.
+      </p>
+    </div>
+    <div class="card orange reveal">
+      <h4>Different dtypes by design</h4>
+      <p>
+        fp32 vs bf16 means the GPU reads and multiplies half the bytes. The 29× projection
+        ratio is arithmetic <em>and</em> precision, not silicon alone.
+      </p>
+    </div>
+    <div class="card purple reveal">
+      <h4>Profiled windows are distorted</h4>
+      <p>
+        Python self time in the window is 27.9&nbsp;s (CPU) and 2.1&nbsp;s (GPU) against
+        3.8&nbsp;s / 0.14&nbsp;s of attributed work: profiler overhead and asyncio waits live
+        there. The taxonomy attributes work and prints the excluded share rather than hiding it.
+      </p>
+    </div>
+    <div class="card blue reveal">
+      <h4>Absolute CPU numbers drift</h4>
+      <p>
+        A repeat of the same CPU run gave 4.12&nbsp;ms/layer here versus ~3.6&nbsp;ms/layer
+        earlier (≈15%), with projection shares moving under 1.5 points. Compare shares and
+        per-projection ratios; treat absolute CPU milliseconds as ±15%.
+      </p>
+    </div>
+    <div class="card teal reveal">
+      <h4>The GPU window is one request</h4>
+      <p>
+        <code>max_iterations=20</code> stops at the end of request 0's 19th decode step. The
+        remaining three requests are served but not recorded. Enough for per-step anatomy, which
+        repeats layer for layer; not a throughput sample.
+      </p>
+    </div>
+    <div class="card green reveal">
+      <h4>One model, one host, one artifact</h4>
+      <p>
+        Qwen3-0.6B, 28 layers, hidden 1024; one laptop CPU without AMX; one 8&nbsp;GB 4060;
+        eager mode. A bigger model, longer context, higher concurrency, or a Sapphire Rapids
+        CPU would move the constants — and some of the shares.
+      </p>
+    </div>
+  </div>
+
+  <div class="prose mt-lg">
+    <p>
+      The most important limit is the one the method is built around: <strong>the profile is
+      composition, the benchmark is cost</strong>. Read the trace to learn what the work is made
+      of and which phase dominates. Read <code>benchmarks.json</code> for latency and
+      throughput. The trace's absolute decode step time is inflated by eager mode, stack
+      unwinding, shape recording and profiler bookkeeping; use it for shares, not for SLOs.
+    </p>
+  </div>
+
+  <h3>Glossary</h3>
+  <dl class="glossary">
+    <div class="term"><dt>engine step</dt><dd>One iteration of <code>EngineCore.step()</code>: schedule a batch, run one forward, sample, update state. The unit the profiler records.</dd></div>
+    <div class="term"><dt>prefill / decode</dt><dd>Prefill processes the prompt tokens in one wide GEMM; decode produces one token per sequence per step, at <code>M = batch size</code>.</dd></div>
+    <div class="term"><dt>context / generation</dt><dd>The annotation's two request classes: still prefilling vs already producing output tokens.</dd></div>
+    <div class="term"><dt>annotation</dt><dd>The <code>user_annotation</code> vLLM writes around each forward, named with the scheduler's request and token counts.</dd></div>
+    <div class="term"><dt>attribution</dt><dd>Assigning a measured duration to a stage and op class. On CPU, by enclosing Python frame and ATen op; on GPU, by correlating a kernel to its launch point.</dd></div>
+    <div class="term"><dt>self time</dt><dd>Time in an event excluding its children. On CPU this is wall time; on GPU per-op self time is not wall time.</dd></div>
+    <div class="term"><dt>device time</dt><dd>Kernel duration on the GPU clock, correlated back to the launching host op.</dd></div>
+    <div class="term"><dt>host span</dt><dd>Duration of a Python/C++ scope on the host clock. Can outlast or under-run the device work it launches.</dd></div>
+    <div class="term"><dt>eager mode</dt><dd><code>--enforce-eager</code>: no CUDA graphs, every kernel launched individually. Required for per-op attribution.</dd></div>
+    <div class="term"><dt>CUDA graph</dt><dd>A captured replay of many launches. It makes serving faster and per-op profiling meaningless — the trace shows one replay node.</dd></div>
+    <div class="term"><dt>paged attention</dt><dd>Attention over KV cache stored in fixed-size blocks, so sequences can grow and share blocks without contiguous allocation.</dd></div>
+    <div class="term"><dt>prefix cache</dt><dd>Reuse of KV blocks for a shared prompt prefix. Useful in serving; a trap when warmup and measurement share a prefix.</dd></div>
+    <div class="term"><dt>bandwidth-bound</dt><dd>Limited by bytes moved, not FLOPs. Decode is the canonical case: one token, all weights read once.</dd></div>
+    <div class="term"><dt>unattributed</dt><dd>Time inside a layer frame with no attributed op/kernel below it. On CPU: dispatch and interpreter. On GPU: launch gaps and device idle.</dd></div>
+    <div class="term"><dt>taxonomy</dt><dd>The fixed two-axis vocabulary (engine stage × op class) both legs are mapped into before comparison.</dd></div>
+  </dl>
+
+  <div class="callout insight reveal">
+    <span class="callout-label">If you take one thing away</span>
+    <p>
+      Ask what the number is a measurement <em>of</em>. “27× faster” is a ratio of two
+      attributed sums. “74% of the layer span has no kernel” is a statement about launch
+      economics. “No norm row on CPU” is a statement about fusion. A profile is useful exactly
+      to the extent that you can say which of those you are looking at.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer wrap">
+  <div class="footer-grid">
+    <div>
+      <div class="footer-mark"><span class="brand-dot"></span>vLLM profiling study</div>
+      <p>
+        Built from the method, traces and analysis in this repository. vLLM 0.33.0
+        (<code>4ba787ec99</code>), Qwen3-0.6B, one Alder Lake laptop CPU and one RTX 4060
+        Laptop. Figures are generated by <code>analysis/plot_compare.py</code> and
+        <code>analysis/step_report.py</code>.
+      </p>
+      <p>
+        The long-form sources are <code>docs/01</code>–<code>docs/05</code>. Every rule quoted
+        here is enforced by the harness or pinned by a test; the caveats are part of the
+        result, not an afterthought.
+      </p>
+    </div>
+    <a class="to-top" href="#top">Back to top ↑</a>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  /* Reading progress */
+  var bar = document.getElementById("progress");
+  function onScroll() {
+    var doc = document.documentElement;
+    var max = doc.scrollHeight - doc.clientHeight;
+    var pct = max > 0 ? (doc.scrollTop / max) * 100 : 0;
+    if (bar) bar.style.width = pct.toFixed(2) + "%";
+  }
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll);
+  onScroll();
+
+  /* Reveal on first view */
+  var reveals = document.querySelectorAll(".reveal");
+  if ("IntersectionObserver" in window) {
+    var ro = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          e.target.classList.add("in");
+          ro.unobserve(e.target);
+        }
+      });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.06 });
+    reveals.forEach(function (el) { ro.observe(el); });
+  } else {
+    reveals.forEach(function (el) { el.classList.add("in"); });
+  }
+
+  /* Active nav link */
+  var links = Array.prototype.slice.call(document.querySelectorAll(".nav a"));
+  var sections = links
+    .map(function (a) { return document.querySelector(a.getAttribute("href")); })
+    .filter(Boolean);
+  if ("IntersectionObserver" in window && sections.length) {
+    var visible = {};
+    var no = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { visible[e.target.id] = e.isIntersecting; });
+      var current = null;
+      for (var i = 0; i < sections.length; i++) {
+        if (visible[sections[i].id]) current = sections[i].id;
+      }
+      if (current) {
+        links.forEach(function (a) {
+          a.classList.toggle("active", a.getAttribute("href") === "#" + current);
+        });
+      }
+    }, { rootMargin: "-25% 0px -60% 0px", threshold: 0 });
+    sections.forEach(function (s) { no.observe(s); });
+  }
+})();
+</script>
+</body>
+</html>
