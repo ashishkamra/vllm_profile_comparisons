@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="color-scheme" content="dark" />
-<title>Reading a vLLM profile — CPU vs GPU, one step at a time</title>
+<title>Earlier write-up: op-class costs, CPU vs GPU (superseded)</title>
 <meta name="description" content="A guided tour of two vLLM profiler traces: how a request becomes an engine step, how two different traces are forced into one vocabulary, and what the CPU and the GPU disagree about." />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -839,6 +839,19 @@
 </header>
 <div class="progress-track" aria-hidden="true"><div class="progress-bar" id="progress"></div></div>
 <main id="main">
+<div class="wrap" style="padding-top:1.2rem;">
+  <div class="callout warn" style="margin:0;">
+    <span class="callout-label">Earlier write-up — read the request-journey guide first</span>
+    <p>
+      This page compares op-class costs from two eager traces. The main guide,
+      <a href="index.html">How vLLM serves a request</a>, follows the request through vLLM's real
+      process layout and corrects several statements made here: the runs were not single-process,
+      the GPU runs <code>step_with_batch_queue()</code> with async scheduling, “launch-bound” applies
+      to eager mode only, and the slow first request was the trace being flushed, not profiler
+      start-up. See its <a href="index.html#corrections">corrections</a>.
+    </p>
+  </div>
+</div>
 <section class="hero wrap" id="top">
   <div class="eyebrow">A field guide to two traces</div>
   <h1>Reading a vLLM profile, <em>one engine step</em> at a time</h1>

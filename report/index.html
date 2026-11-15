@@ -1,0 +1,2154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>How vLLM serves a request — on a CPU and on a GPU, read from the profiler</title>
+<meta name="description" content="Follow one request through vLLM 0.33 — API server, engine core, worker, GPU — on a laptop CPU and an RTX 4060, using profiler traces from every process on one clock." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700;800;900&family=Red+Hat+Mono:wght@400;500;600&family=Red+Hat+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     TOKENS
+     ============================================================ */
+  :root {
+    --bg-canvas:      #151515;
+    --bg-elevated:    #1a1a1a;
+    --bg-inset:       #101010;
+    --bg-card:        #202020;
+    --bg-hover:       #262626;
+    --text-primary:   #ffffff;
+    --text-secondary: #d2d2d2;
+    --text-muted:     #8a8a8a;
+    --rh-red:         #EE0000;
+    --rh-red-dark:    #A30000;
+    --rh-teal:        #009596;
+    --rh-teal-light:  #2fc4c4;
+    --rh-blue:        #0066CC;
+    --rh-blue-light:  #4394e5;
+    --rh-purple:      #6753AC;
+    --rh-green:       #3E8635;
+    --rh-green-light: #5ba84f;
+    --rh-orange:      #F4B400;
+    --border-subtle:  #333333;
+    --border-muted:   #444444;
+    --border-strong:  #5a5a5a;
+
+    --font-sans: "Red Hat Display", "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+    --font-text: "Red Hat Text", "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+    --font-mono: "Red Hat Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    --fs-display-xl: clamp(2.1rem, 5.2vw, 3.4rem);
+    --fs-display-lg: clamp(1.55rem, 3.2vw, 2.05rem);
+    --fs-h2:         clamp(1.3rem, 2.4vw, 1.55rem);
+    --fs-h3:         1.05rem;
+    --fs-body-lead:  1.12rem;
+    --fs-body:       0.95rem;
+    --fs-label:      0.7rem;
+    --fs-small:      0.72rem;
+    --fs-micro:      0.64rem;
+
+    --space-xs:  0.5rem;
+    --space-sm:  0.75rem;
+    --space-md:  1rem;
+    --space-lg:  1.5rem;
+    --space-xl:  2rem;
+    --space-2xl: 3rem;
+    --space-3xl: 4.5rem;
+
+    --w-page: 1120px;
+    --w-prose: 74ch;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --shadow-card: 0 1px 0 rgba(255,255,255,0.03) inset, 0 12px 32px rgba(0,0,0,0.28);
+    --header-h: 56px;
+  }
+
+  /* ============================================================
+     BASE
+     ============================================================ */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header-h) + 24px); }
+  body {
+    margin: 0;
+    font-family: var(--font-text);
+    font-size: var(--fs-body);
+    line-height: 1.68;
+    color: var(--text-secondary);
+    background:
+      radial-gradient(900px 500px at 85% -10%, rgba(238,0,0,0.09), transparent 60%),
+      radial-gradient(700px 420px at 8% 4%, rgba(0,149,150,0.07), transparent 60%),
+      var(--bg-canvas);
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  img, svg { max-width: 100%; display: block; }
+  a { color: var(--rh-blue-light); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--rh-blue-light);
+    outline-offset: 3px;
+    border-radius: 3px;
+  }
+  ::selection { background: rgba(238,0,0,0.35); color: #fff; }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+    line-height: 1.16;
+    letter-spacing: -0.015em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  p { margin: 0 0 1rem; }
+  p:last-child { margin-bottom: 0; }
+  strong { color: var(--text-primary); font-weight: 600; }
+  em { color: var(--text-primary); font-style: italic; }
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    color: #f0d7d7;
+    background: rgba(255,255,255,0.055);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 4px;
+    padding: 0.1em 0.34em;
+    white-space: nowrap;
+  }
+  hr {
+    border: 0;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border-muted), transparent);
+    margin: var(--space-2xl) 0;
+  }
+
+  .skip-link {
+    position: absolute;
+    top: -60px; left: 16px;
+    z-index: 200;
+    background: var(--rh-red);
+    color: #fff;
+    padding: 0.6rem 1rem;
+    font-family: var(--font-sans);
+    font-weight: 600;
+    border-radius: 0 0 6px 6px;
+  }
+  .skip-link:focus { top: 0; }
+
+  /* ============================================================
+     HEADER / NAV
+     ============================================================ */
+  .site-header {
+    position: fixed;
+    inset: 0 0 auto 0;
+    height: var(--header-h);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    padding: 0 clamp(1rem, 4vw, 2.5rem);
+    background: rgba(21,21,21,0.86);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex: 0 0 auto;
+    font-family: var(--font-sans);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-primary);
+    white-space: nowrap;
+  }
+  .brand-dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--rh-red);
+    box-shadow: 0 0 0 4px rgba(238,0,0,0.16);
+  }
+  .brand span { color: var(--text-muted); font-weight: 500; }
+  .nav {
+    display: flex;
+    gap: 0.15rem;
+    margin-left: auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav a {
+    display: block;
+    padding: 0.38rem 0.62rem;
+    border-radius: 5px;
+    font-family: var(--font-sans);
+    font-size: 0.74rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+    transition: color .16s ease, background-color .16s ease;
+  }
+  .nav a:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); text-decoration: none; }
+  .nav a.active { color: var(--text-primary); background: rgba(238,0,0,0.16); }
+  .nav a.active::before {
+    content: "";
+    display: inline-block;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--rh-red);
+    margin-right: 0.4rem;
+    vertical-align: 1px;
+  }
+  .progress-track {
+    position: fixed;
+    top: var(--header-h);
+    left: 0; right: 0;
+    height: 2px;
+    background: transparent;
+    z-index: 101;
+  }
+  .progress-bar {
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, var(--rh-red), var(--rh-orange));
+    transition: width .08s linear;
+  }
+
+  /* ============================================================
+     LAYOUT
+     ============================================================ */
+  .wrap { width: min(var(--w-page), calc(100% - clamp(2rem, 8vw, 5rem))); margin-inline: auto; }
+  main { padding-top: var(--header-h); }
+  .section { padding: var(--space-3xl) 0 var(--space-2xl); border-top: 1px solid rgba(255,255,255,0.055); }
+  .section:first-of-type { border-top: 0; }
+  .section-head { margin-bottom: var(--space-xl); max-width: 62rem; }
+  .section-num {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--rh-red);
+    margin-bottom: 0.7rem;
+  }
+  .section-num::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    max-width: 120px;
+    background: linear-gradient(90deg, rgba(238,0,0,0.7), transparent);
+  }
+  .section h2 { font-size: var(--fs-h2); font-weight: 700; margin-bottom: 0.6rem; }
+  .section h3 {
+    font-size: var(--fs-h3);
+    font-weight: 600;
+    margin: var(--space-xl) 0 var(--space-sm);
+    padding-left: 0.7rem;
+    border-left: 3px solid var(--border-muted);
+  }
+  .section h3 .h3-tag {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-left: 0.55rem;
+    text-transform: uppercase;
+    font-weight: 400;
+  }
+  .lead { font-size: var(--fs-body-lead); color: var(--text-secondary); max-width: 68ch; }
+  .prose { max-width: var(--w-prose); }
+  .prose p { color: var(--text-secondary); }
+  .muted { color: var(--text-muted); }
+  .small { font-size: var(--fs-small); }
+  .mono { font-family: var(--font-mono); }
+  .nowrap { white-space: nowrap; }
+  .rh-red { color: var(--rh-red); }
+  .teal { color: var(--rh-teal-light); }
+  .blue { color: var(--rh-blue-light); }
+  .orange { color: var(--rh-orange); }
+  .green { color: var(--rh-green-light); }
+  .purple { color: #9b8ad4; }
+  .mt-0 { margin-top: 0; }
+  .mt-sm { margin-top: var(--space-sm); }
+  .mt-md { margin-top: var(--space-md); }
+  .mt-lg { margin-top: var(--space-lg); }
+  .mb-0 { margin-bottom: 0; }
+</style>
+<style>
+  /* ============================================================
+     HERO
+     ============================================================ */
+  .hero { padding: clamp(3rem, 8vw, 6rem) 0 var(--space-2xl); position: relative; }
+  .hero::after {
+    content: "";
+    position: absolute;
+    right: 0; top: 12%;
+    width: min(38vw, 420px);
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(238,0,0,0.13), transparent 66%);
+    pointer-events: none;
+    z-index: -1;
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 1.1rem;
+  }
+  .eyebrow::before { content: ""; width: 26px; height: 2px; background: var(--rh-red); }
+  .hero h1 {
+    font-size: var(--fs-display-xl);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    max-width: 19ch;
+    margin-bottom: 1.1rem;
+  }
+  .hero h1 em { font-style: normal; color: var(--rh-red); }
+  .hero-lead {
+    font-size: clamp(1rem, 1.7vw, 1.2rem);
+    max-width: 66ch;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-lg);
+  }
+  .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 1.4rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--border-subtle);
+  }
+  .hero-meta span strong { color: var(--text-secondary); font-weight: 500; }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    background: var(--border-subtle);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    margin-top: var(--space-xl);
+  }
+  .stat {
+    background: var(--bg-elevated);
+    padding: 1.15rem 1.2rem 1.1rem;
+  }
+  .stat-value {
+    font-family: var(--font-sans);
+    font-size: clamp(1.6rem, 3.2vw, 2.15rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
+    line-height: 1;
+    margin-bottom: 0.45rem;
+  }
+  .stat-value small { font-size: 0.52em; font-weight: 500; color: var(--text-muted); letter-spacing: 0; }
+  .stat-label {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    line-height: 1.45;
+  }
+
+  /* ============================================================
+     CARDS, CALLOUTS, PILLS
+     ============================================================ */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 255px), 1fr));
+    gap: var(--space-md);
+    margin: var(--space-lg) 0;
+  }
+  .card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.022), transparent 60%), var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 1.1rem 1.15rem 1.15rem;
+    box-shadow: var(--shadow-card);
+    position: relative;
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 1.1rem; bottom: 1.1rem;
+    width: 2px;
+    background: var(--border-muted);
+    border-radius: 2px;
+  }
+  .card.red::before    { background: var(--rh-red); }
+  .card.teal::before   { background: var(--rh-teal); }
+  .card.blue::before   { background: var(--rh-blue-light); }
+  .card.orange::before { background: var(--rh-orange); }
+  .card.green::before  { background: var(--rh-green-light); }
+  .card.purple::before { background: var(--rh-purple); }
+  .card h4 {
+    font-size: 0.92rem;
+    font-weight: 600;
+    margin-bottom: 0.45rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+  }
+  .card p { font-size: 0.88rem; line-height: 1.62; color: var(--text-secondary); }
+  .card .card-kicker {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.45rem;
+  }
+  .card-num {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    color: var(--text-muted);
+    border: 1px solid var(--border-muted);
+    border-radius: 99px;
+    padding: 0.05rem 0.4rem;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+  }
+
+  .callout {
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--border-muted);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    background: var(--bg-elevated);
+    padding: 1rem 1.15rem;
+    margin: var(--space-lg) 0;
+  }
+  .callout .callout-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.4rem;
+  }
+  .callout p { font-size: 0.9rem; }
+  .callout.note   { border-left-color: var(--rh-blue-light); }
+  .callout.note   .callout-label { color: var(--rh-blue-light); }
+  .callout.trap   { border-left-color: var(--rh-red); background: rgba(238,0,0,0.045); }
+  .callout.trap   .callout-label { color: #ff6b6b; }
+  .callout.insight{ border-left-color: var(--rh-teal); }
+  .callout.insight .callout-label { color: var(--rh-teal-light); }
+  .callout.warn   { border-left-color: var(--rh-orange); }
+  .callout.warn   .callout-label { color: var(--rh-orange); }
+
+  .pill-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.7rem 0; }
+  .pill {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.03em;
+    padding: 0.22rem 0.55rem;
+    border-radius: 99px;
+    border: 1px solid var(--border-muted);
+    color: var(--text-secondary);
+    background: rgba(255,255,255,0.03);
+  }
+  .pill.red   { border-color: rgba(238,0,0,0.5);   color: #ff8a8a; background: rgba(238,0,0,0.09); }
+  .pill.teal  { border-color: rgba(0,149,150,0.5); color: #5fd6d6; background: rgba(0,149,150,0.09); }
+  .pill.blue  { border-color: rgba(67,148,229,0.5);color: #8cbdf0; background: rgba(0,102,204,0.1); }
+  .pill.orange{ border-color: rgba(244,180,0,0.5); color: #f6cd62; background: rgba(244,180,0,0.08); }
+
+  /* ============================================================
+     TABLES
+     ============================================================ */
+  .table-wrap {
+    margin: var(--space-lg) 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    overflow-x: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.84rem;
+    min-width: 560px;
+  }
+  caption {
+    caption-side: top;
+    text-align: left;
+    padding: 0.75rem 1rem 0.65rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  th, td {
+    padding: 0.52rem 0.85rem;
+    text-align: left;
+    border-bottom: 1px solid rgba(255,255,255,0.055);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    font-weight: 500;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: rgba(255,255,255,0.025);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: rgba(255,255,255,0.022); }
+  td.num, th.num {
+    text-align: right;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  tr.total td {
+    background: rgba(238,0,0,0.07);
+    color: var(--text-primary);
+    font-weight: 600;
+    border-top: 1px solid rgba(238,0,0,0.28);
+  }
+  tr.sub td { color: var(--text-muted); font-size: 0.78rem; }
+  td.name { color: var(--text-primary); font-family: var(--font-mono); font-size: 0.79rem; white-space: nowrap; }
+  .bar-cell { min-width: 110px; }
+  .bar {
+    display: block;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border-muted);
+    position: relative;
+    margin-top: 0.28rem;
+  }
+  .bar > i { display: block; height: 100%; border-radius: 3px; background: var(--rh-teal); }
+  .bar.cpu > i { background: var(--rh-red); }
+  .bar.gpu > i { background: var(--rh-teal); }
+
+  /* ============================================================
+     CODE
+     ============================================================ */
+  pre {
+    margin: var(--space-md) 0;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 0.95rem 1.1rem;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 1.62;
+    color: #d8d8d8;
+    tab-size: 2;
+  }
+  pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+    white-space: pre;
+  }
+  pre .c  { color: #7d7d7d; }
+  pre .k  { color: #ff8a8a; }
+  pre .s  { color: #a8d8a8; }
+  pre .f  { color: #8cbdf0; }
+  pre .n  { color: #f6cd62; }
+  .code-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-top: var(--space-lg);
+    margin-bottom: -0.35rem;
+  }
+
+  /* ============================================================
+     FIGURES
+     ============================================================ */
+  figure {
+    margin: var(--space-xl) 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    overflow: hidden;
+  }
+  figure img {
+    width: 100%;
+    height: auto;
+    background: #fff;
+  }
+  figcaption {
+    padding: 0.8rem 1rem 0.9rem;
+    font-size: 0.8rem;
+    line-height: 1.55;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-subtle);
+  }
+  figcaption strong { color: var(--text-secondary); font-weight: 600; }
+  .fig-wide { margin-inline: calc(-1 * clamp(0rem, 3vw, 2rem)); }
+  @media (max-width: 640px) { .fig-wide { margin-inline: 0; } }
+
+  /* ============================================================
+     FLOW DIAGRAM
+     ============================================================ */
+  .flow {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border-subtle);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    margin: var(--space-lg) 0;
+  }
+  .flow-col { background: var(--bg-elevated); padding: 1rem 1.1rem 1.1rem; }
+  .flow-col h4 {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .flow-item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.6rem;
+    align-items: baseline;
+    padding: 0.38rem 0;
+    border-bottom: 1px dashed rgba(255,255,255,0.06);
+    font-size: 0.82rem;
+  }
+  .flow-item:last-child { border-bottom: 0; }
+  .flow-item .code-ref {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .flow-item.accent {
+    color: var(--text-primary);
+    border-left: 2px solid var(--rh-red);
+    margin-left: -0.6rem;
+    padding-left: 0.5rem;
+  }
+  .flow-note {
+    grid-column: 1 / -1;
+    padding: 0.7rem 1.1rem;
+    background: var(--bg-inset);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-subtle);
+  }
+  @media (max-width: 720px) { .flow { grid-template-columns: 1fr; } }
+
+  /* ============================================================
+     STEP LIST
+     ============================================================ */
+  .steps {
+    counter-reset: step;
+    list-style: none;
+    padding: 0;
+    margin: var(--space-lg) 0;
+    border-left: 1px solid var(--border-muted);
+    margin-left: 0.65rem;
+  }
+  .steps > li {
+    counter-increment: step;
+    position: relative;
+    padding: 0 0 var(--space-lg) 1.6rem;
+  }
+  .steps > li:last-child { padding-bottom: 0; }
+  .steps > li::before {
+    content: counter(step, decimal-leading-zero);
+    position: absolute;
+    left: -0.72rem;
+    top: 0.1rem;
+    width: 1.4rem;
+    height: 1.4rem;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--bg-canvas);
+    border: 1px solid var(--border-muted);
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    color: var(--text-muted);
+  }
+  .steps > li h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 0.28rem;
+  }
+  .steps > li p { font-size: 0.89rem; }
+
+  /* ============================================================
+     SPLIT / TERMS
+     ============================================================ */
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-lg);
+    align-items: start;
+  }
+  @media (max-width: 820px) { .split { grid-template-columns: 1fr; } }
+
+  .glossary { margin: var(--space-lg) 0; }
+  .term {
+    display: grid;
+    grid-template-columns: minmax(120px, 200px) 1fr;
+    gap: 1rem;
+    padding: 0.8rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.055);
+  }
+  .term:last-child { border-bottom: 0; }
+  .term dt {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-primary);
+    padding-top: 0.05rem;
+  }
+  .term dd { margin: 0; font-size: 0.87rem; }
+  @media (max-width: 560px) { .term { grid-template-columns: 1fr; gap: 0.2rem; } }
+
+  /* ============================================================
+     FOOTER
+     ============================================================ */
+  .site-footer {
+    border-top: 1px solid var(--border-subtle);
+    padding: var(--space-xl) 0 var(--space-2xl);
+    margin-top: var(--space-2xl);
+  }
+  .footer-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: var(--space-lg);
+    align-items: start;
+  }
+  @media (max-width: 720px) { .footer-grid { grid-template-columns: 1fr; } }
+  .site-footer p { font-size: 0.8rem; color: var(--text-muted); }
+  .site-footer .footer-mark {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 0.6rem;
+  }
+  .site-footer .footer-mark .brand-dot { width: 7px; height: 7px; }
+  .to-top {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border: 1px solid var(--border-muted);
+    border-radius: 99px;
+    padding: 0.4rem 0.85rem;
+    justify-self: end;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .to-top:hover { color: var(--text-primary); border-color: var(--border-strong); background: rgba(255,255,255,0.05); text-decoration: none; }
+
+  /* ============================================================
+     REVEAL ANIMATION
+     ============================================================ */
+  .reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity .55s cubic-bezier(.2,.7,.3,1), transform .55s cubic-bezier(.2,.7,.3,1);
+  }
+  .reveal.in { opacity: 1; transform: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+    .progress-bar { transition: none; }
+    * { animation-duration: 0.001ms !important; }
+  }
+
+  /* ============================================================
+     PRINT
+     ============================================================ */
+  @media print {
+    :root { --bg-canvas: #fff; --bg-elevated: #fff; --bg-card: #fff; --bg-inset: #f6f6f6;
+            --text-primary: #111; --text-secondary: #222; --text-muted: #555;
+            --border-subtle: #ccc; --border-muted: #bbb; }
+    body { background: #fff; font-size: 10.5pt; }
+    .site-header, .progress-track, .to-top, .skip-link { display: none !important; }
+    main { padding-top: 0; }
+    .section { padding: 1.2rem 0; break-inside: avoid-page; }
+    .section h2 { break-after: avoid; }
+    .card, .callout, figure, .table-wrap, pre { break-inside: avoid; box-shadow: none; }
+    .reveal { opacity: 1; transform: none; }
+    a { color: #0645ad; }
+    .hero { padding-top: 1rem; }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="brand"><span class="brand-dot"></span>vLLM <span>/ request journey</span></div>
+  <nav class="nav" aria-label="Guide sections">
+    <a href="#map">Map</a>
+    <a href="#startup">Startup</a>
+    <a href="#journey">Journey</a>
+    <a href="#loop">Engine loop</a>
+    <a href="#model">Forward pass</a>
+    <a href="#scheduler">Scheduler</a>
+    <a href="#stream">Way back</a>
+    <a href="#diy">Do it yourself</a>
+    <a href="#corrections">Corrections</a>
+  </nav>
+</header>
+<div class="progress-track" aria-hidden="true"><div class="progress-bar" id="progress"></div></div>
+<main id="main">
+<style>
+  /* ---- guide-specific components ---- */
+  .procmap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 78px minmax(0, 1fr) 78px minmax(0, 1fr);
+    align-items: stretch;
+    margin: var(--space-lg) 0 var(--space-md);
+  }
+  .proc {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: linear-gradient(180deg, rgba(255,255,255,0.025), transparent 50%), var(--bg-card);
+    padding: 0.9rem 0.95rem 0.8rem;
+    box-shadow: var(--shadow-card);
+  }
+  .proc.gpu { border-color: rgba(0,149,150,0.45); }
+  .proc.dim { opacity: 0.55; border-style: dashed; }
+  .proc h4 {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-bottom: 0.15rem;
+  }
+  .proc .proc-sub { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.55rem; }
+  .thread {
+    border-left: 2px solid var(--border-muted);
+    background: rgba(255,255,255,0.025);
+    border-radius: 0 6px 6px 0;
+    padding: 0.38rem 0.6rem 0.42rem;
+    margin: 0.4rem 0;
+  }
+  .thread b { display: block; font-family: var(--font-sans); font-size: 0.8rem; color: var(--text-primary); font-weight: 600; }
+  .thread span { display: block; font-size: 0.72rem; line-height: 1.45; color: var(--text-secondary); }
+  .thread.main { border-left-color: var(--rh-red); }
+  .thread.io { border-left-color: var(--rh-orange); }
+  .thread.tok { border-left-color: #9b8ad4; }
+  .thread.dev { border-left-color: var(--rh-teal); }
+  .wire {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    gap: 0.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.04em;
+    color: var(--rh-orange);
+    padding: 0 0.3rem;
+  }
+  .wire::before { content: "⇄"; font-size: 1.15rem; color: var(--rh-orange); line-height: 1; }
+  .wire.dev { color: var(--rh-teal-light); }
+  .wire.dev::before { content: "→"; color: var(--rh-teal-light); }
+  @media (max-width: 860px) {
+    .procmap { grid-template-columns: 1fr; }
+    .wire { flex-direction: row; padding: 0.5rem 0; }
+  }
+  .legend-list {
+    columns: 2;
+    column-gap: 2rem;
+    font-size: 0.78rem;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    margin: 0;
+    padding: 0.7rem 1rem 0.9rem 2.2rem;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-elevated);
+  }
+  .legend-list li { break-inside: avoid; margin-bottom: 0.15rem; }
+  .legend-list .t { font-family: var(--font-mono); color: var(--text-primary); font-size: 0.72rem; }
+  @media (max-width: 720px) { .legend-list { columns: 1; } }
+  .src { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; }
+  td .src { white-space: normal; }
+  td code { white-space: normal; overflow-wrap: anywhere; }
+  .card code, .callout code { white-space: normal; overflow-wrap: anywhere; }
+  .devtag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.08rem 0.4rem;
+    border-radius: 4px;
+    margin-right: 0.35rem;
+    vertical-align: 1px;
+  }
+  .devtag.cpu { color: #ff9a9a; background: rgba(238,0,0,0.12); border: 1px solid rgba(238,0,0,0.35); }
+  .devtag.gpu { color: #6fdada; background: rgba(0,149,150,0.12); border: 1px solid rgba(0,149,150,0.4); }
+  .devtag.both { color: var(--text-secondary); background: rgba(255,255,255,0.05); border: 1px solid var(--border-muted); }
+  tr.phase td { background: rgba(255,255,255,0.035); color: var(--text-muted); font-family: var(--font-mono);
+                font-size: 0.64rem; letter-spacing: 0.1em; text-transform: uppercase; padding-top: 0.45rem; padding-bottom: 0.45rem; }
+  td.hl { color: var(--text-primary); font-weight: 600; }
+</style>
+
+<section class="hero wrap" id="top">
+  <div class="eyebrow">vLLM 0.33, read from the profiler</div>
+  <h1>How vLLM serves a request — <em>on a CPU and on a GPU</em></h1>
+  <p class="hero-lead">
+    We sent the same request to vLLM on a laptop CPU and on an RTX&nbsp;4060, recorded every
+    process with the profiler, and put all the traces on one clock. This guide follows that
+    request from the HTTP socket to the model and back, one function at a time, and shows which
+    parts of vLLM change when the device changes.
+  </p>
+  <p class="hero-lead" style="font-size:1rem;color:var(--text-muted);">
+    Every claim here comes from a trace or from a line of vLLM's source, and is cited. The
+    numbers are there to make the mechanism visible, not to rank the hardware.
+  </p>
+
+  <div class="stats" role="list">
+    <div class="stat" role="listitem">
+      <div class="stat-value">3 <small>vs</small> 2</div>
+      <div class="stat-label">processes vLLM runs by default: CPU vs GPU</div>
+    </div>
+    <div class="stat" role="listitem">
+      <div class="stat-value">5–8<small> ms</small></div>
+      <div class="stat-label">from the client's send to the first engine step, on both</div>
+    </div>
+    <div class="stat" role="listitem">
+      <div class="stat-value">1.5 s <small>vs</small> 42 ms</div>
+      <div class="stat-label">time to first token for a 512-token prompt</div>
+    </div>
+    <div class="stat" role="listitem">
+      <div class="stat-value">137 <small>vs</small> 6.4 ms</div>
+      <div class="stat-label">per output token, vLLM's default configuration</div>
+    </div>
+  </div>
+
+  <div class="hero-meta">
+    <span><strong>vLLM</strong> 0.33.0 · 4ba787ec99</span>
+    <span><strong>Model</strong> Qwen3-0.6B · 28 layers</span>
+    <span><strong>CPU leg</strong> i7-12800H · fp32</span>
+    <span><strong>GPU leg</strong> RTX 4060 Laptop 8&nbsp;GB on a Ryzen 9 7940HS · bf16</span>
+    <span><strong>Captures</strong> 8 · {cpu, gpu} × {default, eager} × {single, staggered}</span>
+  </div>
+</section>
+
+<section class="section wrap" id="how-to-read">
+  <div class="section-head">
+    <div class="section-num">00 · how this guide works</div>
+    <h2>Eight captures, one timeline per run</h2>
+    <p class="lead">
+      For each device we captured vLLM twice: once in its <strong>default</strong>
+      configuration (how it really runs) and once <strong>eager</strong> (no compilation, no
+      CUDA graphs, so every operation is visible). Each was driven with a single request, and
+      again with four requests arriving at staggered moments.
+    </p>
+  </div>
+
+  <div class="cards">
+    <div class="card red reveal">
+      <div class="card-kicker">what was recorded</div>
+      <h4>Every process, on one clock</h4>
+      <p>
+        The API server's trace, the engine core's (or the worker's) trace with CPU ops and GPU
+        kernels, a py-spy sample of the CPU engine core where it has no profiler, and the
+        client's own timestamp for every token. torch stamps each trace with
+        <code>baseTimeNanoseconds</code>; <code>base/1000 + ts</code> is wall-clock time, so the
+        files line up to within about a millisecond.
+      </p>
+    </div>
+    <div class="card teal reveal">
+      <div class="card-kicker">the request</div>
+      <h4>512 prompt tokens, 32 streamed out</h4>
+      <p>
+        Streaming, so every token travels back through the API server as its own chunk, the way
+        a chat client sees it. A short throwaway request goes first inside the profiled window,
+        so the measured request is not the first one the profiler sees.
+      </p>
+    </div>
+    <div class="card blue reveal">
+      <div class="card-kicker">how to read a chapter</div>
+      <h4>What vLLM does → where → what the trace shows</h4>
+      <p>
+        Each chapter names the mechanism, cites the source (<span class="src">file.py:line</span>
+        at v0.33.0), shows it in a trace, and says what is different on the other device. Tags
+        like <span class="devtag cpu">cpu</span><span class="devtag gpu">gpu</span> mark what is
+        device-specific.
+      </p>
+    </div>
+    <div class="card orange reveal">
+      <div class="card-kicker">one caution</div>
+      <h4>Two different host machines</h4>
+      <p>
+        The GPU sits in a different laptop (Ryzen 9 7940HS) than the CPU leg (i7-12800H). The
+        API server and scheduler are CPU work on both, so their microseconds reflect two
+        different CPUs. Compare the <em>shape</em> of those phases, not their exact times.
+      </p>
+    </div>
+  </div>
+
+  <div class="callout note reveal">
+    <span class="callout-label">Where the colours in every timeline come from</span>
+    <p>
+      The timeline figures have one row per thread that matters. Each row is coloured by the
+      innermost recognisable vLLM function running at that moment: blue = HTTP/OpenAI layer,
+      purple = tokenize or add-request, orange = IPC (ZMQ or shared memory), teal =
+      <code>schedule()</code>, green = prepare inputs, red = model forward, pink =
+      <code>compute_logits</code>, yellow = sample, light blue = <code>update_from_output</code>
+      and the output path, dark grey = blocked waiting, mid grey = waiting for the GPU. Yellow
+      ticks on the client row are tokens arriving.
+    </p>
+  </div>
+</section>
+<section class="section wrap" id="map">
+  <div class="section-head">
+    <div class="section-num">01 · the map</div>
+    <h2>Processes, threads, and the wires between them</h2>
+    <p class="lead">
+      <code>vllm serve</code> is not one program. It is a front end that speaks HTTP and an
+      engine that runs the model, in separate processes that exchange messages. On the CPU,
+      vLLM splits off a third process. Knowing which process and thread does what is the key
+      to reading any vLLM trace.
+    </p>
+  </div>
+
+  <h3>CPU: three processes<span class="h3-tag">vLLM defaults, as traced</span></h3>
+  <div class="procmap reveal" role="img" aria-label="CPU process map: API server, EngineCore, Worker">
+    <div class="proc">
+      <h4>API server</h4>
+      <div class="proc-sub">process “APIServer” · the frontend</div>
+      <div class="thread main"><b>main thread (asyncio)</b><span>uvicorn → FastAPI → OpenAI completions handler → <code>AsyncLLM</code>; later the output handler, detokenizer, SSE</span></div>
+      <div class="thread tok"><b>tokenizer pool thread</b><span>HF fast tokenizer, run off the event loop</span></div>
+    </div>
+    <div class="wire">ZMQ<br/>msgpack</div>
+    <div class="proc">
+      <h4>EngineCore</h4>
+      <div class="proc-sub">process “EngineCore” · the scheduler</div>
+      <div class="thread io"><b>input thread</b><span>receives requests from ZMQ, builds <code>Request</code>s, queues them</span></div>
+      <div class="thread main"><b>main thread: the busy loop</b><span><code>Scheduler</code> + KV-cache manager; sends each step to the worker and waits</span></div>
+      <div class="thread io"><b>output thread</b><span>encodes <code>EngineCoreOutputs</code>, sends them over ZMQ</span></div>
+    </div>
+    <div class="wire">shared-memory<br/>queue</div>
+    <div class="proc">
+      <h4>Worker</h4>
+      <div class="proc-sub">process “Worker” · the model</div>
+      <div class="thread main"><b>main thread: worker loop</b><span>model runner: prepare inputs → forward → logits → sample</span></div>
+      <div class="thread"><b>13 OpenMP threads</b><span>oneDNN GEMMs and CPU attention, pinned to cores</span></div>
+    </div>
+  </div>
+
+  <h3>GPU: two processes and a device<span class="h3-tag">vLLM defaults, as traced</span></h3>
+  <div class="procmap reveal" role="img" aria-label="GPU process map: API server, EngineCore with the worker inside, GPU">
+    <div class="proc">
+      <h4>API server</h4>
+      <div class="proc-sub">same code as on the CPU</div>
+      <div class="thread main"><b>main thread (asyncio)</b><span>HTTP, OpenAI layer, <code>AsyncLLM</code>, output handler, SSE</span></div>
+      <div class="thread tok"><b>tokenizer pool thread</b><span>HF fast tokenizer</span></div>
+    </div>
+    <div class="wire">ZMQ<br/>msgpack</div>
+    <div class="proc">
+      <h4>EngineCore (+ worker)</h4>
+      <div class="proc-sub">the model runner lives in this process</div>
+      <div class="thread io"><b>input thread</b><span>as on the CPU</span></div>
+      <div class="thread main"><b>main thread: busy loop</b><span>scheduler <em>and</em> model runner: schedule one step ahead, launch CUDA graphs, wait on an event</span></div>
+      <div class="thread io"><b>output thread</b><span>as on the CPU</span></div>
+    </div>
+    <div class="wire dev">CUDA<br/>stream</div>
+    <div class="proc gpu">
+      <h4>GPU</h4>
+      <div class="proc-sub">RTX 4060 Laptop · stream 7</div>
+      <div class="thread dev"><b>kernels</b><span>~377 per decode step: cuBLAS GEMV/GEMM, FlashAttention, Inductor-generated Triton kernels, replayed from a CUDA graph</span></div>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>
+      The API server is the same code on both devices, and on both it hands requests to a
+      separate EngineCore process over ZMQ. <code>AsyncLLM</code> has no in-process mode at all:
+      <span class="src">v1/engine/core_client.py:115</span> raises if asyncio is used without
+      multiprocessing. The difference is where the model runs.
+    </p>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table style="min-width:760px;">
+      <caption>What vLLM 0.33 picks by default on each device (confirmed in the server logs of these runs)</caption>
+      <thead><tr><th>decision</th><th>CPU</th><th>GPU</th><th>where it is decided</th></tr></thead>
+      <tbody>
+        <tr><td class="name">where the model runs</td><td>its own <strong>Worker process</strong> (<code>mp</code> executor)</td><td>inside the EngineCore (<code>uni</code> executor)</td><td><span class="src">platforms/cpu.py:351</span> “OMP requires the MP executor”; <span class="src">config/parallel.py:1099</span></td></tr>
+        <tr><td class="name">engine loop</td><td><code>step()</code>, synchronous</td><td><code>step_with_batch_queue()</code>: async scheduling, 2 batches in flight</td><td><span class="src">platforms/cpu.py:347</span> “async scheduling is not required on CPU”; <span class="src">config/vllm.py:1719</span>, <span class="src">v1/engine/core.py:232</span></td></tr>
+        <tr><td class="name">scheduler class</td><td><code>Scheduler</code></td><td><code>AsyncScheduler</code></td><td><span class="src">config/scheduler.py:231</span></td></tr>
+        <tr><td class="name">torch.compile</td><td>Inductor, <code>DYNAMO_TRACE_ONCE</code></td><td>Inductor → Triton, <code>VLLM_COMPILE</code></td><td><span class="src">platforms/cpu.py:373</span>; log: <code>compilation_config.mode</code></td></tr>
+        <tr><td class="name">CUDA graphs</td><td>none</td><td><code>FULL_AND_PIECEWISE</code>: FULL graphs for decode batches ≤ 16 requests, PIECEWISE for mixed batches ≤ 32 tokens</td><td><span class="src">platforms/cpu.py:371</span>; log: “Capturing CUDA graphs”</td></tr>
+        <tr><td class="name">attention</td><td>vLLM's CPU attention (<code>_C::cpu_attention_with_kv_cache</code>)</td><td>FlashAttention (<code>FLASH_ATTN</code>)</td><td><span class="src">v1/attention/backends/cpu_attn.py</span>; log: <span class="src">cuda.py:508</span></td></tr>
+        <tr><td class="name">KV block size</td><td><strong>128</strong> tokens</td><td><strong>16</strong> tokens</td><td><span class="src">platforms/cpu.py:549</span> (<code>update_block_size_for_backend</code>); <span class="src">config/cache.py:185</span></td></tr>
+        <tr><td class="name">KV cache size</td><td>fixed 4&nbsp;GiB (<code>VLLM_CPU_KVCACHE_SPACE</code>) → 18,688 fp32 tokens, 9.1 requests of 2K</td><td>5.21&nbsp;GiB left at <code>--gpu-memory-utilization 0.85</code> → 48,768 bf16 tokens, 23.8 requests of 2K</td><td>logs: “CPU/GPU KV cache size”</td></tr>
+        <tr><td class="name">dtype</td><td>float32 (no bf16 hardware path on this CPU)</td><td>bfloat16</td><td><code>dtype_for</code> in <span class="src">harness/env.sh</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="cards">
+    <div class="card red reveal">
+      <div class="card-kicker"><span class="devtag cpu">cpu</span>why a third process</div>
+      <h4>OpenMP needs its own process</h4>
+      <p>
+        The CPU worker pins OpenMP threads to cores and sets thread-binding environment variables
+        before torch starts. That cannot be done inside the engine-core process, so vLLM moves the
+        model into a worker and talks to it through a shared-memory queue
+        (<span class="src">distributed/device_communicators/shm_broadcast.py</span>).
+      </p>
+    </div>
+    <div class="card teal reveal">
+      <div class="card-kicker"><span class="devtag gpu">gpu</span>why async scheduling</div>
+      <h4>Keep the GPU fed</h4>
+      <p>
+        On a GPU the host can prepare step N+1 while the device computes step N. vLLM does exactly
+        that by default. On a CPU there is nothing to overlap with: the cores doing the math are
+        the same cores that would schedule, so vLLM turns it off.
+      </p>
+    </div>
+    <div class="card blue reveal">
+      <div class="card-kicker"><span class="devtag both">both</span>what stays the same</div>
+      <h4>The engine's logic</h4>
+      <p>
+        Same API server, same <code>Scheduler</code> algorithm, same model runner class
+        (<code>CPUModelRunner</code> subclasses <code>GPUModelRunner</code>), same model code.
+        When four requests arrive, both devices make <em>identical</em> scheduling decisions
+        (chapter 6).
+      </p>
+    </div>
+  </div>
+
+  <h3>The same request, end to end, in each layout</h3>
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j1-request-cpu-default-single.png" alt="Timeline of one request on the CPU across the API server, the engine core (sampled with py-spy) and the worker process." loading="lazy" />
+    <figcaption>
+      <strong>CPU, vLLM defaults.</strong> The client waits ~1.5&nbsp;s for the first token (the
+      512-token prefill in the worker, red), then a token arrives every ~137&nbsp;ms. The worker
+      is busy the whole time. The EngineCore's busy loop (sampled with py-spy, because it carries
+      no torch profiler in this layout) spends almost all of it <em>spin-waiting</em> on the
+      shared-memory queue for the worker's reply.
+    </figcaption>
+  </figure>
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j1-request-gpu-default-single.png" alt="Timeline of one request on the GPU across the API server, the engine core and the GPU kernel stream." loading="lazy" />
+    <figcaption>
+      <strong>GPU, vLLM defaults.</strong> Same request, 240&nbsp;ms in total. The busy loop
+      alternates short bursts of host work with waits for the GPU (mid grey). The GPU row is
+      almost solid: the device is the bottleneck, which is the point of CUDA graphs and async
+      scheduling. Each yellow client tick is matched by a short burst on the API server's main
+      thread, which turns the engine's output into an SSE chunk.
+    </figcaption>
+  </figure>
+</section>
+<section class="section wrap" id="startup">
+  <div class="section-head">
+    <div class="section-num">02 · before the first request</div>
+    <h2>What vLLM does between <code>vllm serve</code> and “startup complete”</h2>
+    <p class="lead">
+      Most of vLLM's structure is decided at startup: which processes exist, how much KV cache
+      there is, which graphs have been compiled and captured. The server's own log records each
+      decision. These lines come from the default-mode runs.
+    </p>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table style="min-width:720px;">
+      <caption>Startup, from the server logs (results/journey/*-default-single.serve.log)</caption>
+      <thead><tr><th>stage</th><th><span class="devtag cpu">cpu</span></th><th><span class="devtag gpu">gpu</span></th></tr></thead>
+      <tbody>
+        <tr><td class="name">processes</td><td>API server → spawns EngineCore → spawns Worker</td><td>API server → spawns EngineCore (the worker lives inside it)</td></tr>
+        <tr><td class="name">threads</td><td>OpenMP auto-binding: 13 threads in the worker (<code>VLLM_CPU_OMP_THREADS_BIND=auto</code>)</td><td>one CUDA stream for compute</td></tr>
+        <tr><td class="name">load weights</td><td>0.83 s</td><td>0.16 s · 1.12 GiB on the device</td></tr>
+        <tr><td class="name">torch.compile</td><td>~31 s: the cached AOT artifact failed to load, so Inductor recompiled and saved it again</td><td>0.13 s: loaded from the compile cache</td></tr>
+        <tr><td class="name">warm-up / profiling run</td><td>“Warming up model for the compilation”</td><td>a dummy forward to measure peak activation memory</td></tr>
+        <tr><td class="name">KV cache</td><td>4.0 GiB fixed → <strong>18,688 tokens</strong> = 146 blocks × 128</td><td>5.21 GiB available → <strong>48,768 tokens</strong> = 3,048 blocks × 16</td></tr>
+        <tr><td class="name">CUDA graphs</td><td>—</td><td>7 PIECEWISE (1…32 tokens) + 5 FULL (1…16 requests) captured in ~1 s, 0.06 GiB</td></tr>
+        <tr class="total"><td class="name">init engine / boot-to-ready</td><td>38.4 s / 68 s</td><td>4.5 s / 22 s</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="prose">
+    <p>
+      The KV-cache line is the one to understand, because it sets how many requests vLLM can
+      hold at once. One token of KV for this model is 28 layers × (K and V) × 8 KV heads × 128
+      dims × bytes per value: <strong>229,376&nbsp;B in fp32</strong>, 114,688&nbsp;B in bf16. The
+      CPU leg gets a fixed budget (<code>VLLM_CPU_KVCACHE_SPACE</code>, 4&nbsp;GiB here). The GPU
+      gets whatever is left of 85% of device memory after weights, activations and graphs. The
+      engine then rounds down to whole blocks: 4&nbsp;GiB ÷ 229,376 = 18,724 tokens, rounded
+      down to a multiple of 128 is 18,688. That rounding is also how we found the CPU's block
+      size before finding the line that sets it.
+    </p>
+    <p>
+      The KV cache tensor appears in every attention op of the CPU trace with its shape:
+      <code>[146, 8, 128, 128]</code> — blocks, KV heads, tokens per block, head dim — once for K
+      and once for V. Every request's KV lives in those 146 blocks, handed out by the scheduler's
+      KV-cache manager.
+    </p>
+  </div>
+
+  <div class="callout insight reveal">
+    <span class="callout-label">Compilation decides what the traces will look like</span>
+    <p>
+      In the default runs the model forward is a compiled graph. On the CPU it is one function
+      generated by Inductor (from the compile cache). On the GPU it is a CUDA graph replay for
+      decode, and Triton kernels launched one by one for a 512-token prefill, because no graph
+      was captured for anything larger than 32 tokens. The Python modules you know from the
+      model file — <code>Qwen3DecoderLayer</code>, <code>RMSNorm</code>, <code>SiluAndMul</code>
+      — only appear in the trace in eager mode. That is why this guide uses both: default to
+      see how vLLM really runs, eager to see what it runs.
+    </p>
+  </div>
+</section>
+<section class="section wrap" id="journey">
+  <div class="section-head">
+    <div class="section-num">03 · one request, end to end</div>
+    <h2>From the HTTP socket to the first token, function by function</h2>
+    <p class="lead">
+      This is the request's whole path as the traces recorded it: every hop between threads and
+      processes, with the vLLM function that does the work and the moment it happened. Times
+      are milliseconds after the client sent the request.
+    </p>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table style="min-width:900px;">
+      <caption>Milestones of the measured request (512 prompt tokens), all four configurations · results/journey/*-single.journey.json</caption>
+      <thead>
+        <tr><th>what happens</th><th>where in vLLM</th><th class="num">cpu eager</th><th class="num">cpu default</th><th class="num">gpu eager</th><th class="num">gpu default</th></tr>
+      </thead>
+      <tbody>
+        <tr class="phase"><td colspan="6">in: API server → engine core (all host-side Python)</td></tr>
+        <tr><td>client sends the HTTP request</td><td><span class="src">harness/drive_journey.py</span></td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">0</td></tr>
+        <tr><td>uvicorn parses it, FastAPI routes and validates it</td><td><span class="src">uvicorn · fastapi/routing</span></td><td class="num">0.53</td><td class="num">0.68</td><td class="num">0.82</td><td class="num">0.80</td></tr>
+        <tr><td>OpenAI completions handler starts</td><td><span class="src">entrypoints/openai/completion/api_router.py:37 → serving.py:115</span></td><td class="num">1.36</td><td class="num">2.17</td><td class="num">2.06</td><td class="num">2.34</td></tr>
+        <tr><td>prompt tokenized, on a thread-pool thread</td><td><span class="src">renderers/base.py:842 → utils/async_utils.py:38 (run_in_executor)</span></td><td class="num">1.82–2.58</td><td class="num">2.79–3.77</td><td class="num">2.65–4.52</td><td class="num">2.97–4.37</td></tr>
+        <tr><td><code>AsyncLLM.add_request</code>: build the <code>EngineCoreRequest</code></td><td><span class="src">v1/engine/async_llm.py:397 · input_processor.py:373</span></td><td class="num">3.51</td><td class="num">5.38</td><td class="num">6.04</td><td class="num">5.69</td></tr>
+        <tr><td>sent to the engine over ZMQ</td><td><span class="src">v1/engine/core_client.py:1339</span></td><td class="num">3.84</td><td class="num">5.76</td><td class="num">6.52</td><td class="num">6.12</td></tr>
+        <tr><td>engine <em>input thread</em> decodes it into a <code>Request</code>, queues it</td><td><span class="src">v1/engine/core.py:1126 (thread: core.py:1933)</span></td><td class="num">4.28</td><td class="num muted">py-spy</td><td class="num">7.05</td><td class="num">6.48</td></tr>
+        <tr><td>busy loop wakes: <code>Scheduler.add_request</code> → WAITING queue</td><td><span class="src">v1/core/sched/scheduler.py:2931</span></td><td class="num">4.57</td><td class="num muted">py-spy</td><td class="num">7.87</td><td class="num">7.00</td></tr>
+        <tr><td><code>schedule()</code>: admit the request, allocate its KV blocks</td><td><span class="src">scheduler.py:699 · kv_cache_manager.py:380</span></td><td class="num">4.64</td><td class="num muted">py-spy</td><td class="num">7.96</td><td class="num">7.06</td></tr>
+        <tr><td><span class="devtag cpu">cpu</span>worker process picks up <code>execute_model</code> from shared memory</td><td><span class="src">v1/executor/multiproc_executor.py:1163</span></td><td class="num">—</td><td class="num">6.99</td><td class="num">—</td><td class="num">—</td></tr>
+        <tr class="phase"><td colspan="6">the prefill step: 512 tokens through 28 layers, then the logits</td></tr>
+        <tr><td>step starts (<code>execute_context_1(512)_generation_0(0)</code>)</td><td><span class="src">v1/worker/gpu_worker.py:1332 → gpu_model_runner.py:3905</span></td><td class="num hl">5.55</td><td class="num hl">7.12</td><td class="num hl">9.66</td><td class="num hl">8.20</td></tr>
+        <tr><td><span class="devtag gpu">gpu</span>first kernel runs on the device</td><td>CUDA stream</td><td class="num">—</td><td class="num">—</td><td class="num">10.38</td><td class="num">8.78</td></tr>
+        <tr><td>host finishes the step (forward + <code>compute_logits</code>)</td><td>end of the annotation</td><td class="num">1472.6</td><td class="num">1504.6</td><td class="num">37.28</td><td class="num">34.50</td></tr>
+        <tr><td><code>sample_tokens</code>: the sampler picks the token</td><td><span class="src">gpu_model_runner.py:4269 → v1/sample/sampler.py:129</span></td><td class="num">1472.8</td><td class="num">1505.2</td><td class="num">37.34</td><td class="num">34.57</td></tr>
+        <tr><td><span class="devtag gpu">gpu</span>last kernel of the step finishes</td><td>CUDA stream</td><td class="num">—</td><td class="num">—</td><td class="num">41.72</td><td class="num">39.14</td></tr>
+        <tr class="phase"><td colspan="6">out: engine core → API server → client</td></tr>
+        <tr><td><span class="devtag cpu">cpu</span>worker returns the token through shared memory</td><td><span class="src">multiproc_executor.py:1096</span></td><td class="num">—</td><td class="num">1505.9</td><td class="num">—</td><td class="num">—</td></tr>
+        <tr><td><code>update_from_output</code>: append the token, check stop conditions</td><td><span class="src">scheduler.py:2259</span></td><td class="num">1473.4</td><td class="num muted">py-spy</td><td class="num hl">63.68</td><td class="num">39.46</td></tr>
+        <tr><td>engine <em>output thread</em> sends <code>EngineCoreOutputs</code> over ZMQ</td><td><span class="src">core.py:2144 (thread: core.py:2042)</span></td><td class="num">1474.1</td><td class="num muted">py-spy</td><td class="num">64.45</td><td class="num">40.70</td></tr>
+        <tr><td>API server receives and decodes it</td><td><span class="src">core_client.py:1217 → async_llm.py:880</span></td><td class="num">1480.1</td><td class="num">1506.6</td><td class="num">64.86</td><td class="num">41.05</td></tr>
+        <tr><td><code>OutputProcessor</code> updates the request's state</td><td><span class="src">v1/engine/output_processor.py:728</span></td><td class="num">1480.6</td><td class="num">1506.8</td><td class="num">65.14</td><td class="num">41.26</td></tr>
+        <tr><td>incremental detokenization</td><td><span class="src">v1/engine/detokenizer.py:96</span></td><td class="num">1480.7</td><td class="num">1506.9</td><td class="num">65.19</td><td class="num">41.30</td></tr>
+        <tr><td>SSE chunk written to the socket</td><td><span class="src">completion/serving.py:326 → uvicorn send</span></td><td class="num">1481.5</td><td class="num">1507.5</td><td class="num">65.74</td><td class="num">42.06</td></tr>
+        <tr class="total"><td>client receives the first token (TTFT)</td><td></td><td class="num">1481.8</td><td class="num">1507.7</td><td class="num">65.90</td><td class="num">42.25</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="cards">
+    <div class="card blue reveal">
+      <div class="card-kicker">in: 5–8 ms on both devices</div>
+      <h4>The front half is the same code</h4>
+      <p>
+        HTTP parsing, the OpenAI layer, tokenization, building the engine request, one ZMQ hop,
+        one queue hop, and the scheduler admitting the request: about 5.5&nbsp;ms on the CPU leg's
+        host and 8&nbsp;ms on the GPU leg's. It is CPU work on both devices, and the GPU leg's host is a
+        different processor. The CPU's three-process layout adds the
+        shared-memory hand-off to the worker: ~1.2&nbsp;ms from the ZMQ send to the worker
+        picking up the step.
+      </p>
+    </div>
+    <div class="card red reveal">
+      <div class="card-kicker">the prefill: where TTFT goes</div>
+      <h4>1,467 ms of math vs 30 ms of GPU</h4>
+      <p>
+        On the CPU, 99% of TTFT is the prefill step itself. On the GPU, the prefill runs from the
+        first kernel at 8.8&nbsp;ms to the last at 39.1&nbsp;ms. The host finished launching at
+        34.5&nbsp;ms and the device ran ~4.6&nbsp;ms behind. No CUDA graph covers a 512-token batch
+        (graphs stop at 32 tokens), so even in default mode each compiled kernel is launched
+        separately.
+      </p>
+    </div>
+    <div class="card teal reveal">
+      <div class="card-kicker">out: 2–3 ms, except one case</div>
+      <h4>Async scheduling can delay the first token</h4>
+      <p>
+        In GPU eager mode the token is sampled at 37.3&nbsp;ms but only reaches
+        <code>update_from_output</code> at <strong>63.7&nbsp;ms</strong>. Between the two, the
+        engine scheduled and <em>launched the next decode step</em> (20&nbsp;ms of eager kernel
+        launching) before collecting the first result. That is how the batch queue works
+        (chapter 4). With CUDA graphs the next launch takes ~1.7&nbsp;ms, so the cost almost
+        disappears.
+      </p>
+    </div>
+  </div>
+
+  <h3>The way in, zoomed<span class="h3-tag">numbers = the list under each figure</span></h3>
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j2-inbound-cpu-eager-single.png" alt="Zoomed timeline of the first 7 milliseconds after the client sends the request, CPU eager run." loading="lazy" />
+    <figcaption>
+      <strong>CPU eager, first 7&nbsp;ms.</strong> The request crosses four threads in two
+      processes before any model code runs. Tokenization runs on a separate thread while the
+      event loop stays free. The engine input thread (orange then purple) decodes the request
+      while the busy loop is still blocked; the busy loop then wakes, admits it in
+      <code>schedule()</code> (teal, 0.77&nbsp;ms) and starts preparing inputs (green).
+    </figcaption>
+    <ol class="legend-list">
+      <li><span class="t">0.00</span> client sends</li>
+      <li><span class="t">0.53</span> uvicorn / FastAPI</li>
+      <li><span class="t">1.36</span> completions handler</li>
+      <li><span class="t">1.82</span> tokenize starts (pool thread)</li>
+      <li><span class="t">2.58</span> tokenize ends</li>
+      <li><span class="t">3.51</span> AsyncLLM.add_request</li>
+      <li><span class="t">3.84</span> ZMQ send</li>
+      <li><span class="t">4.28</span> engine input thread decodes</li>
+      <li><span class="t">4.57</span> Scheduler.add_request</li>
+      <li><span class="t">4.64</span> schedule()</li>
+      <li><span class="t">5.55</span> prefill step starts</li>
+    </ol>
+  </figure>
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j2-inbound-gpu-default-single.png" alt="Zoomed timeline of the first 10 milliseconds after the client sends the request, GPU default run, including the first GPU kernels." loading="lazy" />
+    <figcaption>
+      <strong>GPU defaults, first 10&nbsp;ms.</strong> The same path on the other machine, plus
+      a GPU row. The first kernel runs 0.6&nbsp;ms after the step starts. From there the host
+      (red, launching compiled kernels) stays ahead of the device.
+    </figcaption>
+    <ol class="legend-list">
+      <li><span class="t">0.00</span> client sends</li>
+      <li><span class="t">0.80</span> uvicorn / FastAPI</li>
+      <li><span class="t">2.34</span> completions handler</li>
+      <li><span class="t">2.97</span> tokenize starts</li>
+      <li><span class="t">4.37</span> tokenize ends</li>
+      <li><span class="t">5.69</span> AsyncLLM.add_request</li>
+      <li><span class="t">6.12</span> ZMQ send</li>
+      <li><span class="t">6.48</span> engine input thread decodes</li>
+      <li><span class="t">7.00</span> Scheduler.add_request</li>
+      <li><span class="t">7.06</span> schedule()</li>
+      <li><span class="t">8.20</span> prefill step starts</li>
+      <li><span class="t">8.78</span> first GPU kernel</li>
+    </ol>
+  </figure>
+
+  <h3>The way out, zoomed</h3>
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j3-outbound-cpu-eager-single.png" alt="Zoomed timeline from sampling the first token to the client receiving it, CPU eager run." loading="lazy" />
+    <figcaption>
+      <strong>CPU eager, from the sampler to the client.</strong> As soon as
+      <code>update_from_output</code> returns, the busy loop starts the <em>next</em> step (red,
+      to the right). Handing the output to the client happens on two other threads: the engine's
+      output thread and the API server's event loop. Here the API server picked the message up
+      ~6&nbsp;ms after it was sent. Across the run the median for that hop is 0.31&nbsp;ms; this
+      first token after a long prefill was the one outlier.
+    </figcaption>
+    <ol class="legend-list">
+      <li><span class="t">1472.75</span> sample_tokens</li>
+      <li><span class="t">1473.36</span> update_from_output</li>
+      <li><span class="t">1474.10</span> output thread: ZMQ send</li>
+      <li><span class="t">1480.09</span> API server receives</li>
+      <li><span class="t">1480.62</span> OutputProcessor</li>
+      <li><span class="t">1480.68</span> detokenize</li>
+      <li><span class="t">1481.46</span> SSE send</li>
+      <li><span class="t">1481.79</span> client receives</li>
+    </ol>
+  </figure>
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j3-outbound-gpu-default-single.png" alt="Zoomed timeline from sampling the first token to the client receiving it, GPU default run, showing the next step being launched before the result is collected." loading="lazy" />
+    <figcaption>
+      <strong>GPU defaults, from the sampler to the client.</strong> After the sampler (1) the
+      busy loop does <em>not</em> wait. It schedules (teal), prepares (green) and launches (red)
+      the next decode step, then blocks on a CUDA event (mid grey) until the GPU finishes the
+      prefill (2). Only then does <code>update_from_output</code> (3) run, followed by the ZMQ
+      send (4) and the API server's output path (5–8).
+    </figcaption>
+    <ol class="legend-list">
+      <li><span class="t">34.57</span> sample_tokens (host)</li>
+      <li><span class="t">39.14</span> last GPU kernel of the prefill</li>
+      <li><span class="t">39.46</span> update_from_output</li>
+      <li><span class="t">40.70</span> output thread: ZMQ send</li>
+      <li><span class="t">41.05</span> API server receives</li>
+      <li><span class="t">41.26</span> OutputProcessor</li>
+      <li><span class="t">41.30</span> detokenize</li>
+      <li><span class="t">42.06</span> SSE send</li>
+      <li><span class="t">42.25</span> client receives</li>
+    </ol>
+  </figure>
+
+  <div class="callout trap reveal">
+    <span class="callout-label">Sampling is outside the step annotation — on purpose</span>
+    <p>
+      The trace annotation <code>execute_context_…_generation_…</code> wraps
+      <code>execute_model</code>: the forward pass and <code>compute_logits</code>. The sampler
+      runs afterwards, in a separate executor call (<code>sample_tokens</code>), so it appears
+      in the gap after each step. <code>execute_model</code> stashes the logits and returns
+      <code>None</code>; the engine core then asks for the sample
+      (<span class="src">v1/engine/core.py:684-686</span>). A step that seems to be missing its
+      sampler is working as designed.
+    </p>
+  </div>
+</section>
+<section class="section wrap" id="loop">
+  <div class="section-head">
+    <div class="section-num">04 · the engine loop</div>
+    <h2>One loop drives everything: schedule, execute, sample, update</h2>
+    <p class="lead">
+      Once a request is admitted, everything that happens to it happens in the EngineCore's busy
+      loop, one iteration per token. That loop is the heart of vLLM, and it is the part that
+      differs most between the two devices.
+    </p>
+  </div>
+
+  <div class="code-label"><span>the busy loop</span><span>v1/engine/core.py:1621</span></div>
+<pre><code><span class="k">def</span> <span class="f">run_busy_loop</span>(self):
+    <span class="k">while</span> self._handle_shutdown():
+        self._process_input_queue()     <span class="c"># block until there is work; add/abort requests</span>
+        self._process_engine_step()     <span class="c"># one step: self.step_fn(), then queue the outputs</span></code></pre>
+
+  <div class="prose">
+    <p>
+      In the traces this loop is the whole life of the main thread. Before the first request it
+      sits in <code>_process_input_queue</code> → <code>queue.get</code> (108&nbsp;ms in the CPU
+      eager run, 506&nbsp;ms during the pause between the two requests). It runs no timer: the
+      input queue drives it. When a request is waiting it runs steps back to back.
+      <code>step_fn</code> is where the devices part ways.
+    </p>
+  </div>
+
+  <h3><span class="devtag cpu">cpu</span><code>step()</code>: one batch at a time</h3>
+  <div class="code-label"><span>synchronous step, condensed</span><span>v1/engine/core.py:667</span></div>
+<pre><code>scheduler_output = self.scheduler.schedule()                       <span class="c"># which requests, how many tokens each</span>
+future = self.model_executor.execute_model(scheduler_output, non_block=<span class="k">True</span>)
+grammar_output = self.scheduler.get_grammar_bitmask(scheduler_output)
+model_output = future.result()                                       <span class="c"># forward + logits (the annotation)</span>
+<span class="k">if</span> model_output <span class="k">is None</span>:
+    model_output = self.model_executor.sample_tokens(grammar_output) <span class="c"># sampler: separate call</span>
+engine_core_outputs = self.scheduler.update_from_output(scheduler_output, model_output)</code></pre>
+
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j4-decode-cpu-eager-single.png" alt="Two CPU decode steps: the busy loop is almost all model forward and logits, with short schedule, sample and update phases between steps." loading="lazy" />
+    <figcaption>
+      <strong>CPU eager, two decode steps (worker inside the engine core).</strong> Per token:
+      <code>schedule()</code> 0.50&nbsp;ms, prepare inputs 1.07&nbsp;ms, model forward
+      124.7&nbsp;ms, <code>compute_logits</code> 24.4&nbsp;ms (the 151,936-wide vocabulary
+      projection, read from 622&nbsp;MB of fp32 weights every step), sample 0.63&nbsp;ms,
+      <code>update_from_output</code> 0.20&nbsp;ms. The scheduler is about 0.5% of the step.
+    </figcaption>
+  </figure>
+
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j4-decode-cpu-default-single.png" alt="Two CPU decode steps in vLLM's default layout: the worker process computes while the engine core spin-waits on a shared-memory queue." loading="lazy" />
+    <figcaption>
+      <strong>CPU defaults: the same two steps across three processes.</strong> The worker does
+      the math: forward 108.7&nbsp;ms per token compiled, against 124.7&nbsp;ms eager. The
+      engine core sends it two RPCs per step through the shared-memory queue,
+      <code>execute_model</code> then <code>sample_tokens</code>, and in between it
+      <em>spin-waits</em> for the reply: py-spy finds it in
+      <code>MessageQueue._wait_until_readable</code> → <code>SpinCondition.wait</code> →
+      <code>sched_yield</code>. The engine core's output thread sends each token the moment the
+      worker returns it.
+    </figcaption>
+  </figure>
+
+  <div class="callout insight reveal">
+    <span class="callout-label">What torch.compile changes on the CPU</span>
+    <p>
+      An eager decode step runs <strong>4,983</strong> ATen and custom ops. Most are
+      <code>aten::to</code>, <code>view</code>, <code>slice</code>, <code>mul</code>: the
+      RMSNorm, RoPE and SiLU arithmetic spelled out one op at a time. The compiled step runs
+      <strong>1,283</strong>. The 28 decoder layers become one Inductor-generated
+      <code>call</code> function. The 113 GEMMs stay oneDNN calls (<code>_C::onednn_mm</code>,
+      28 layers × 4 + <code>lm_head</code>). Attention stays a vLLM custom op
+      (<code>vllm::unified_attention_with_output</code>), which is where vLLM splits the graph.
+      The elementwise work is fused into generated C++ loops. The result: 13% less forward time,
+      because the GEMMs, which compilation does not touch, dominate.
+    </p>
+  </div>
+
+  <h3><span class="devtag gpu">gpu</span><code>step_with_batch_queue()</code>: always one step ahead</h3>
+  <div class="code-label"><span>async step, condensed</span><span>v1/engine/core.py:708</span></div>
+<pre><code><span class="k">if</span> self.scheduler.has_requests():
+    scheduler_output = self.scheduler.schedule()                     <span class="c"># step N+1</span>
+    exec_future = self.model_executor.execute_model(scheduler_output, non_block=<span class="k">True</span>)
+    future = self.model_executor.sample_tokens(grammar_output, non_block=<span class="k">True</span>)
+    batch_queue.appendleft((future, scheduler_output, exec_future))
+    <span class="k">if</span> len(batch_queue) &lt; self.batch_queue_size:                 <span class="c"># size 2 with async scheduling</span>
+        <span class="k">return None</span>, <span class="k">True</span>                                       <span class="c"># don't wait: go schedule again</span>
+future, scheduler_output, _ = batch_queue.pop()                        <span class="c"># step N</span>
+model_output = future.result()                                         <span class="c"># blocks on a CUDA event</span>
+engine_core_outputs = self.scheduler.update_from_output(scheduler_output, model_output)</code></pre>
+
+  <div class="prose">
+    <p>
+      Each call schedules and launches the <em>next</em> step without waiting, then collects the
+      <em>previous</em> one. The host prepares step N+1 while the GPU computes step N. That poses
+      an obvious problem: how can step N+1 be scheduled before step N's token is known? Two
+      pieces of code solve it:
+    </p>
+    <ul style="padding-left:1.2rem;">
+      <li style="margin-bottom:0.4rem;"><code>AsyncScheduler</code> (<span class="src">v1/core/sched/async_scheduler.py</span>) assumes every running request produces exactly one token. It counts a <code>num_output_placeholders</code> per request and schedules the next step as if that token already existed.</li>
+      <li>The model runner never brings the token to the host first. It copies the previous step's sampled IDs on the device (<code>prev_sampled_token_ids</code>, <span class="src">gpu_model_runner.py:1761</span>) into the next step's <code>input_ids</code>. The token reaches the CPU only to be streamed to the client.</li>
+    </ul>
+  </div>
+
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j4-decode-gpu-default-single.png" alt="GPU default: the host-launched prefill, then decode steps where the busy loop does short bursts of work and waits while the GPU runs continuously." loading="lazy" />
+    <figcaption>
+      <strong>GPU defaults, from the prefill into steady decode.</strong> During the prefill the
+      host launches compiled kernels one by one (~24&nbsp;ms of red: no graph covers 512 tokens).
+      After that one loop iteration takes ~6.7&nbsp;ms: ~4.2&nbsp;ms of host work (schedule,
+      prepare inputs, a 0.34&nbsp;ms graph replay with a single <code>cudaGraphLaunch</code>,
+      sample, update) and ~2.5&nbsp;ms waiting on a CUDA event. The GPU row is solid: 6.7&nbsp;ms
+      of kernels per step, back to back. The host is a full step ahead, so
+      a token reaches the client every 6.4&nbsp;ms.
+    </figcaption>
+  </figure>
+
+  <h3>Eager vs CUDA graphs: same kernels, different launcher</h3>
+  <div class="table-wrap reveal">
+    <table>
+      <caption>One GPU decode step, read from the traces (gpu-eager-single vs gpu-default-single)</caption>
+      <thead><tr><th></th><th class="num">eager</th><th class="num">default (CUDA graph)</th></tr></thead>
+      <tbody>
+        <tr><td class="name">host time inside the step annotation</td><td class="num">19.6 ms</td><td class="num hl">2.5 ms</td></tr>
+        <tr><td class="name">launch calls from the host</td><td class="num">349 <code>cudaLaunchKernel</code> + 29 <code>cuLaunchKernel</code> (cuBLAS)</td><td class="num">1 <code>cudaGraphLaunch</code> + 10 small <code>cudaLaunchKernel</code> + 2 driver launches (incl. <code>lm_head</code>, outside the graph)</td></tr>
+        <tr><td class="name">kernels that run on the GPU</td><td class="num">379</td><td class="num">377</td></tr>
+        <tr><td class="name">GPU busy time</td><td class="num">6.0 ms</td><td class="num">6.6 ms</td></tr>
+        <tr><td class="name">host waits for the GPU</td><td class="num">0.01 ms (the GPU is never ahead)</td><td class="num">2.45 ms (the host is ahead)</td></tr>
+        <tr class="total"><td class="name">time per output token at the client</td><td class="num">20.7 ms</td><td class="num">6.4 ms</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j4-decode-gpu-eager-single.png" alt="GPU eager: each decode step is almost entirely host time spent launching kernels; the GPU row has many gaps." loading="lazy" />
+    <figcaption>
+      <strong>GPU eager, three decode steps.</strong> The busy loop spends ~19&nbsp;ms per step in
+      “model forward”. That time goes into Python and <code>cudaLaunchKernel</code>, one call
+      per kernel, not math. The GPU follows about a millisecond behind and is idle most of the
+      time. The wide red block at the end of each step is <code>lm_head</code> (1.25&nbsp;ms on the
+      device). A CUDA graph removes the launch cost, and async scheduling hides what is left
+      behind the GPU's work. Together they turn a 20.7&nbsp;ms token into a 6.4&nbsp;ms one.
+    </figcaption>
+  </figure>
+
+  <div class="table-wrap reveal">
+    <table style="min-width:780px;">
+      <caption>Median per decode step of the measured request, by phase · ms</caption>
+      <thead><tr><th>phase</th><th>where</th><th class="num">cpu eager</th><th class="num">cpu default</th><th class="num">gpu eager</th><th class="num">gpu default</th></tr></thead>
+      <tbody>
+        <tr><td class="name">schedule()</td><td><span class="src">scheduler.py:699</span></td><td class="num">0.50</td><td class="num muted">sampled</td><td class="num">0.20</td><td class="num">0.53</td></tr>
+        <tr><td class="name">prepare inputs</td><td><span class="src">gpu_model_runner.py:1924</span></td><td class="num">1.07</td><td class="num">0.92</td><td class="num">0.89</td><td class="num">1.18</td></tr>
+        <tr><td class="name">model forward (host)</td><td><span class="src">gpu_model_runner.py:3586</span></td><td class="num">124.7</td><td class="num">108.7</td><td class="num">18.4</td><td class="num hl">0.34</td></tr>
+        <tr><td class="name">compute_logits (host)</td><td><span class="src">qwen3.py:339</span></td><td class="num">24.4</td><td class="num">24.4</td><td class="num">0.06</td><td class="num">0.10</td></tr>
+        <tr><td class="name">sample_tokens</td><td><span class="src">gpu_model_runner.py:4269</span></td><td class="num">0.63</td><td class="num">0.67</td><td class="num">0.32</td><td class="num">0.46</td></tr>
+        <tr><td class="name">update_from_output</td><td><span class="src">scheduler.py:2259</span></td><td class="num">0.20</td><td class="num muted">sampled</td><td class="num">0.09</td><td class="num">0.23</td></tr>
+        <tr><td class="name">wait for the GPU</td><td><span class="src">gpu_model_runner.py:318</span></td><td class="num">—</td><td class="num">—</td><td class="num">0.01</td><td class="num hl">2.45</td></tr>
+        <tr class="total"><td class="name">client inter-token latency</td><td></td><td class="num">152.0</td><td class="num">137.4</td><td class="num">20.7</td><td class="num">6.4</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose small muted">
+    “Host” times on the GPU are the time to <em>issue</em> the work, not to run it. On the CPU the
+    host is the device, so these are compute times. The CPU default column has no engine-core
+    rows because there the engine core carries no torch profiler (py-spy only).
+  </p>
+</section>
+<section class="section wrap" id="model">
+  <div class="section-head">
+    <div class="section-num">05 · inside the forward pass</div>
+    <h2>One decoder layer, from Python module to kernel</h2>
+    <p class="lead">
+      The model code is the same on both devices. What changes is what each module turns into
+      when it runs: an ATen op, a vLLM custom op, a oneDNN call, a cuBLAS kernel, or an
+      Inductor-generated Triton kernel replayed from a CUDA graph.
+    </p>
+  </div>
+
+  <div class="code-label"><span>the call path the eager trace records, for one decode token</span><span>cpu-eager-single, step 8</span></div>
+<pre><code>gpu_model_runner.<span class="f">_model_forward</span>                         <span class="c"># v1/worker/gpu_model_runner.py:3586   115.9 ms</span>
+└ Qwen3ForCausalLM.<span class="f">forward</span>                         <span class="c"># model_executor/models/qwen3.py:327</span>
+  └ <span class="f">@support_torch_compile</span> wrapper                  <span class="c"># compilation/decorators.py:533  (a no-op when eager)</span>
+    └ Qwen2Model.<span class="f">forward</span>                            <span class="c"># models/qwen2.py:402  (Qwen3 reuses it)</span>
+      └ Qwen3DecoderLayer.<span class="f">forward</span>  × 28              <span class="c"># models/qwen3.py:231   3.2-5.7 ms each</span>
+          RMSNorm (input, fused residual add)         <span class="c">#   0.17 ms</span>
+          Qwen3Attention.<span class="f">forward</span>                      <span class="c"># models/qwen3.py:156   1.65 ms</span>
+            QKVParallelLinear   1024 → 4096           <span class="c">#   0.61 ms</span>
+            RMSNorm q_norm, RMSNorm k_norm            <span class="c">#   0.16 ms  (Qwen3: per-head norm)</span>
+            RotaryEmbedding                           <span class="c">#   0.05 ms</span>
+            Attention  (write KV, then attend)        <span class="c">#   0.40 ms</span>
+            RowParallelLinear o_proj  2048 → 1024     <span class="c">#   0.32 ms</span>
+          RMSNorm (post-attention, fused add)         <span class="c">#   0.10 ms</span>
+          Qwen2MLP.<span class="f">forward</span>                            <span class="c"># models/qwen2.py:111   1.37 ms</span>
+            MergedColumnParallelLinear gate_up 1024 → 6144   <span class="c">#   0.81 ms</span>
+            SiluAndMul                                <span class="c">#   0.06 ms</span>
+            RowParallelLinear down  3072 → 1024       <span class="c">#   0.48 ms</span>
+qwen3.<span class="f">compute_logits</span> → LogitsProcessor → lm_head   <span class="c"># qwen3.py:339 · 1024 → 151,936   25.9 ms</span></code></pre>
+
+  <div class="table-wrap reveal">
+    <table style="min-width:860px;">
+      <caption>What each part of the layer becomes at run time · read from the four traces</caption>
+      <thead>
+        <tr><th>module</th><th><span class="devtag cpu">cpu</span>eager</th><th><span class="devtag cpu">cpu</span>compiled</th><th><span class="devtag gpu">gpu</span>eager</th><th><span class="devtag gpu">gpu</span>compiled + CUDA graph</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="name">RMSNorm + residual (×2)</td><td><code>fused_add_rms_norm</code> as plain ATen: <code>to</code>, <code>pow</code>, <code>mean</code>, <code>mul</code>…</td><td>fused into Inductor's generated C++</td><td><code>vllm::fused_add_rms_norm_kernel</code></td><td><code>triton_per_fused_fused_add_rms_norm</code></td></tr>
+        <tr><td class="name">QKV, gate_up, down</td><td><code>_C::onednn_mm</code></td><td><code>_C::onednn_mm</code> (unchanged)</td><td>cuBLAS <code>internal::gemvx</code> — at one token a GEMM is a matrix-vector product</td><td>same, inside the graph</td></tr>
+        <tr><td class="name">o_proj</td><td><code>_C::onednn_mm</code></td><td><code>_C::onednn_mm</code></td><td>CUTLASS <code>wmma_tensorop_bf16</code> GEMM</td><td>same, inside the graph</td></tr>
+        <tr><td class="name">q_norm, k_norm, RoPE</td><td>ATen arithmetic + <code>_C::rotary_embedding</code></td><td>fused</td><td><code>vllm::rms_norm_kernel</code> ×2 + <code>vllm::rotary_embedding_kernel</code></td><td>one fused Triton kernel: <code>triton_per_fused_add_cat_index_select_mul_rms_norm_split…</code></td></tr>
+        <tr><td class="name">attention: write K,V</td><td><code>vllm::unified_kv_cache_update</code> → <code>_C::cpu_attn_reshape_and_cache</code></td><td>kept as a custom op</td><td><code>vllm::reshape_and_cache_flash_kernel</code></td><td>same</td></tr>
+        <tr><td class="name">attention: attend</td><td><code>_C::cpu_attention_with_kv_cache</code></td><td>inside <code>vllm::unified_attention_with_output</code>: the graph split point</td><td>FlashAttention <code>flash_fwd_splitkv_kernel</code> + <code>…_combine_kernel</code></td><td>same</td></tr>
+        <tr><td class="name">SiluAndMul</td><td>ATen <code>silu</code>, <code>mul</code></td><td>fused</td><td><code>vllm::act_and_mul_kernel</code></td><td><code>triton_poi_fused_mul_silu_slice</code></td></tr>
+        <tr><td class="name">lm_head (once per step)</td><td><code>_C::onednn_mm</code>, 1024×151,936 fp32: 24.4 ms</td><td>same</td><td>CUTLASS GEMM, 1.25 ms</td><td>same, launched <em>outside</em> the graph</td></tr>
+        <tr class="sub"><td class="name">per decode step</td><td>4,983 host ops</td><td>1,283 host ops</td><td>379 kernels, 378 launches</td><td>377 kernels, 1 graph launch + ~12</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="cards">
+    <div class="card red reveal">
+      <div class="card-kicker">the GEMMs never change</div>
+      <h4>Compilation fuses everything around them</h4>
+      <p>
+        On both devices the four projections per layer stay library calls: oneDNN on the CPU,
+        cuBLAS or CUTLASS on the GPU. torch.compile's job is the glue between them. Norms, RoPE
+        and the SiLU gate collapse from many small ops into a few fused kernels. That is why
+        compilation saves 13% on the CPU (GEMM-dominated) but is essential on the GPU, where the
+        glue meant hundreds of launches.
+      </p>
+    </div>
+    <div class="card teal reveal">
+      <div class="card-kicker">attention is special</div>
+      <h4>It is where vLLM splits the graph</h4>
+      <p>
+        Attention reads the paged KV cache through block tables that change every step, so vLLM
+        keeps it as a custom op (<code>unified_attention_with_output</code>) that torch.compile does
+        not trace through. In PIECEWISE CUDA graphs the pieces sit between attention calls. In
+        FULL graphs (decode) attention is captured too.
+      </p>
+    </div>
+    <div class="card blue reveal">
+      <div class="card-kicker">decode is a memory problem</div>
+      <h4>Every token reads every weight</h4>
+      <p>
+        One decode token multiplies every weight in the model once, so the weights stream from
+        memory each step: ~1.2&nbsp;GB in bf16, ~2.4&nbsp;GB in fp32. The GPU's 6.6&nbsp;ms of
+        kernels is ~180&nbsp;GB/s of a ~272&nbsp;GB/s peak. The CPU's ~133&nbsp;ms of forward and
+        logits is ~18&nbsp;GB/s. <code>lm_head</code> alone is 311&nbsp;MB (bf16) or 622&nbsp;MB (fp32)
+        per step, which is why it is the single biggest op on the CPU.
+      </p>
+    </div>
+  </div>
+</section>
+<section class="section wrap" id="scheduler">
+  <div class="section-head">
+    <div class="section-num">06 · many requests</div>
+    <h2>What the scheduler decides, step by step</h2>
+    <p class="lead">
+      With one request, every step is either “prefill everything” or “decode one token”. The
+      scheduler earns its keep when requests overlap. Four requests were sent to arrive while
+      others were decoding, each triggered by tokens the client had received rather than by a
+      clock, so both devices saw the same pattern.
+    </p>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table>
+      <caption>The staggered scenario (harness/drive_journey.py), with a deliberately small token budget: --max-num-batched-tokens 512</caption>
+      <thead><tr><th>request</th><th class="num">prompt</th><th class="num">output</th><th>sent when</th><th>what it is there to show</th></tr></thead>
+      <tbody>
+        <tr><td class="name">A</td><td class="num">512</td><td class="num">24</td><td>after a short throwaway request</td><td>a prefill that fills the whole budget</td></tr>
+        <tr><td class="name">B</td><td class="num">1,024</td><td class="num">16</td><td>A has 4 tokens</td><td>chunked prefill alongside a running decode</td></tr>
+        <tr><td class="name">C</td><td class="num">256</td><td class="num">16</td><td>A has 8 tokens</td><td>a small prefill mixed into a decode batch</td></tr>
+        <tr><td class="name">D</td><td class="num">512</td><td class="num">8</td><td>A has 14 tokens</td><td>A's exact prompt again: a prefix-cache hit</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j5-steps-cpu-eager-staggered.png" alt="Two-panel chart of the CPU staggered run: tokens scheduled per engine step by request, and the duration of each step." loading="lazy" />
+    <figcaption>
+      <strong>CPU: tokens per step (top) and what each step cost (bottom).</strong> Read straight
+      off the scheduler's own annotations, <code>execute_context_N(T)_generation_M(G)</code>.
+      Prefill time grows with tokens: 1.48&nbsp;s for 512, 0.85&nbsp;s for 256, 0.52&nbsp;s for
+      128. Decode steps cost 126–153&nbsp;ms with one request and 164–176&nbsp;ms with four, so
+      four tokens per step cost ~20% more than one.
+    </figcaption>
+  </figure>
+
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j5-steps-gpu-eager-staggered.png" alt="Two-panel chart of the GPU eager staggered run: the same scheduling decisions, but every step takes about 20 milliseconds regardless of tokens." loading="lazy" />
+    <figcaption>
+      <strong>GPU (eager): the same decisions, a different cost model.</strong> The scheduler
+      made the same choices step for step. Only D's prefix hit differs (16 tokens computed
+      instead of 128, explained below). But every step costs ~18–28&nbsp;ms <em>whatever is in
+      it</em>, because in eager mode a step's cost is launching ~400 kernels, not doing the math.
+      This is the cleanest picture of a launch-bound engine you will get.
+    </figcaption>
+  </figure>
+
+  <h3>Five scheduler behaviours, each visible in one step</h3>
+  <ol class="steps">
+    <li>
+      <h4>A token budget per step</h4>
+      <p>
+        Every step schedules at most <code>max_num_batched_tokens</code> tokens across all
+        requests (512 here; the CPU default is 2,048). A's 512-token prompt takes one whole step.
+        The step boundary is where requests join or leave: <code>schedule()</code> runs once per
+        step (<span class="src">v1/core/sched/scheduler.py:699</span>).
+      </p>
+    </li>
+    <li>
+      <h4>Chunked prefill</h4>
+      <p>
+        B's 1,024 tokens do not fit, so the scheduler splits them into <strong>511 + 511 + 2</strong>
+        across three steps. Each of those steps also carries A's one decode token (511 + 1 = the
+        budget). Running requests are scheduled first, and the prefill takes what is left. A keeps
+        decoding while B prefills, which is why chunked prefill exists.
+      </p>
+    </li>
+    <li>
+      <h4>Mixed batches</h4>
+      <p>
+        C's 256 prompt tokens go in the same step as two decode tokens:
+        <code>execute_context_1(256)_generation_2(2)</code>. One forward pass, one set of
+        weights, different requests at different stages. The attention metadata (block tables,
+        query lengths) is what lets one kernel handle all of them.
+      </p>
+    </li>
+    <li>
+      <h4>Prefix caching, at block granularity</h4>
+      <p>
+        D repeats A's prompt, and A's KV blocks are still cached. The CPU computes only
+        <strong>128</strong> of D's tokens. The scheduler always computes at least the last prompt
+        token (it needs that token's logits), and the cache works in whole blocks, so 3 of the 4
+        128-token blocks hit and the last one is recomputed. The GPU, with
+        16-token blocks, computes only <strong>16</strong> (31 blocks hit). Same algorithm,
+        different block size (<span class="src">platforms/cpu.py:549</span>), so the CPU's
+        cache can miss up to 127 tokens that the GPU's would hit.
+      </p>
+    </li>
+    <li>
+      <h4>Empty steps after a request finishes</h4>
+      <p>
+        After the last token, the trace shows <code>execute_context_0(0)_generation_0(0)</code>:
+        a step with no tokens (0.4&nbsp;ms). <code>has_requests()</code> stays true while finished
+        requests have not yet been reported to the model runner
+        (<span class="src">v1/core/sched/interface.py:205</span>). The next
+        <code>SchedulerOutput</code> carries their IDs so the runner can drop their cached state.
+        On the GPU, with async scheduling, the trace shows two of them.
+      </p>
+    </li>
+  </ol>
+
+  <div class="callout insight reveal">
+    <span class="callout-label">Why batching matters more on one device than the other</span>
+    <p>
+      On the CPU a decode step's cost is mostly reading the weights once (chapter 5), so adding
+      requests to the batch is almost free: 4 tokens for +20%. On the GPU in eager mode the cost
+      is mostly launches, so adding requests is also almost free, for a different reason. With
+      CUDA graphs (gpu-default-staggered) tokens reach the client every 6–9.5&nbsp;ms with 1–4
+      requests in the batch. In all
+      three cases the per-step cost barely depends on how many requests share it. That is what
+      continuous batching exploits: the scheduler adds work to steps that cost nearly the same
+      either way.
+    </p>
+  </div>
+</section>
+<section class="section wrap" id="stream">
+  <div class="section-head">
+    <div class="section-num">07 · the way back</div>
+    <h2>How each token gets from the sampler to the client</h2>
+    <p class="lead">
+      Every step produces at most one token per running request. Getting it to the client is a
+      relay across two processes and three threads. It costs about the same on both devices,
+      because it is all CPU-side Python.
+    </p>
+  </div>
+
+  <ol class="steps">
+    <li>
+      <h4>Engine main thread: <code>update_from_output</code>, then hand off</h4>
+      <p>
+        The scheduler appends the token to the request, checks stop conditions and frees the
+        request's blocks if it finished (<span class="src">scheduler.py:2259</span>). The busy loop
+        puts the resulting <code>EngineCoreOutputs</code>, one object for all requests in the
+        step, on an output queue and immediately starts the next step
+        (<span class="src">core.py:1678</span>).
+      </p>
+    </li>
+    <li>
+      <h4>Engine output thread: encode and send</h4>
+      <p>
+        A separate thread serializes the outputs with msgpack and sends them over ZMQ
+        (<span class="src">core.py:2042, 2144</span>). That way serialization and the socket write
+        never sit inside the engine loop.
+      </p>
+    </li>
+    <li>
+      <h4>API server: receive, process, detokenize</h4>
+      <p>
+        An asyncio task receives and decodes the message (<span class="src">core_client.py:1217</span>).
+        The <code>output_handler</code> task (<span class="src">async_llm.py:880</span>) gives it to
+        <code>OutputProcessor.process_outputs</code> (<span class="src">output_processor.py:728</span>),
+        which updates each request's state, detokenizes incrementally
+        (<span class="src">detokenizer.py:96</span>), checks stop strings, and puts a
+        <code>RequestOutput</code> on that request's queue.
+      </p>
+    </li>
+    <li>
+      <h4>API server: format and stream</h4>
+      <p>
+        The request's <code>completion_stream_generator</code> (<span class="src">openai/completion/serving.py:298</span>)
+        wakes up, builds the OpenAI-format chunk (pydantic → JSON) and writes it as a
+        server-sent event through starlette and uvicorn.
+      </p>
+    </li>
+  </ol>
+
+  <div class="table-wrap reveal">
+    <table>
+      <caption>Per-token cost of the way back · median over 30 tokens of the measured request · ms</caption>
+      <thead><tr><th>stage</th><th class="num">cpu leg host (i7-12800H)</th><th class="num">gpu leg host (Ryzen 9 7940HS)</th></tr></thead>
+      <tbody>
+        <tr><td class="name">engine → API server (ZMQ hop)</td><td class="num">0.31</td><td class="num">0.36</td></tr>
+        <tr><td class="name">output_handler (whole batch)</td><td class="num">0.37</td><td class="num">0.34–0.38</td></tr>
+        <tr><td class="name">↳ OutputProcessor.process_outputs</td><td class="num">0.10</td><td class="num">0.10</td></tr>
+        <tr><td class="name">↳ detokenizer.update</td><td class="num">0.03</td><td class="num">0.02</td></tr>
+        <tr><td class="name">SSE write (uvicorn send)</td><td class="num">0.09–0.11</td><td class="num">0.06</td></tr>
+        <tr class="total"><td class="name">frontend work per token</td><td class="num">≈ 0.6</td><td class="num">≈ 0.6</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="prose">
+    <p>
+      The same ~0.6&nbsp;ms is 0.4% of a 137&nbsp;ms CPU token and about 9% of a 6.4&nbsp;ms GPU
+      token. Detokenization is not the cost (20–30&nbsp;µs). The cost is the Python plumbing
+      around it. This is also why vLLM keeps the API server in its own process: the frontend's
+      event loop and the engine's busy loop never compete for the same interpreter, and on a
+      fast device with many concurrent streams the frontend's per-token work adds up.
+    </p>
+  </div>
+</section>
+
+<section class="section wrap" id="diy">
+  <div class="section-head">
+    <div class="section-num">08 · do it yourself</div>
+    <h2>Profiling vLLM: the knobs, the files, the traps</h2>
+    <p class="lead">
+      Everything in this guide came from vLLM's built-in torch profiler, py-spy, and a client
+      that writes down when each token arrived. Here is how to reproduce it and how to explore
+      the traces on your own.
+    </p>
+  </div>
+
+  <h3>Capture</h3>
+<pre><code><span class="c"># one device, one mode, one scenario (seconds of load; the GPU leg refuses to start above 80 °C)</span>
+DEVICE=cpu MODE=default SCENARIO=single    harness/journey_run.sh
+DEVICE=gpu MODE=eager   SCENARIO=staggered harness/journey_run.sh
+
+<span class="c"># what the harness passes to vllm serve, the part that matters for profiling</span>
+--profiler-config '{"profiler":"torch","torch_profiler_dir":"…",
+                    "torch_profiler_with_stack":true,"torch_profiler_record_shapes":true,
+                    "torch_profiler_use_gzip":true}'
+curl -X POST localhost:8000/start_profile -d '{"max_iterations": 60}'
+<span class="c">#   … send requests …</span>
+curl -X POST localhost:8000/stop_profile</code></pre>
+
+  <div class="table-wrap reveal">
+    <table>
+      <caption>What you get, per process (traces/journey/&lt;run&gt;/)</caption>
+      <thead><tr><th>file</th><th>process</th><th>contents</th><th>bounded by</th></tr></thead>
+      <tbody>
+        <tr><td class="name">*.async_llm.*.pt.trace.json.gz</td><td>API server</td><td>Python frames only: HTTP, tokenizer, AsyncLLM, output path</td><td>start → stop_profile</td></tr>
+        <tr><td class="name">rank0.*.pt.trace.json.gz</td><td>EngineCore <em>(GPU; CPU eager here)</em> or Worker <em>(CPU default)</em></td><td>Python frames, ATen/custom ops with shapes, step annotations, CUDA launches and kernels</td><td><code>max_iterations</code> engine steps, or stop_profile</td></tr>
+        <tr><td class="name">enginecore.pyspy.chrometrace.json</td><td>EngineCore (CPU default)</td><td>2&nbsp;ms samples of every thread: the scheduler side, which has no torch profiler in this layout</td><td>harness start/stop</td></tr>
+        <tr><td class="name">journey.perfetto.json.gz</td><td>all of the above</td><td>merged on one clock, one track per thread, the client's requests and tokens, numbered milestones (R00…) for the measured request</td><td>written by <code>analysis/journey.py</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Explore</h3>
+  <ol class="steps">
+    <li>
+      <h4>Open the merged trace in Perfetto</h4>
+      <p>
+        Go to <a href="https://ui.perfetto.dev" rel="noopener">ui.perfetto.dev</a> → <em>Open trace
+        file</em> → <code>traces/journey/gpu-default-single/journey.perfetto.json.gz</code>. Processes
+        are ordered client → API server → EngineCore → Worker → GPU. Type into the search box at the top for
+        <code>execute_context</code> to find steps, or <code>R0</code> for the request's milestones.
+        Drag over a step and press <kbd>M</kbd> to mark it, then look at what every other
+        thread was doing at that moment. Very short Python frames are dropped to keep the file
+        small; the per-process originals have everything.
+      </p>
+    </li>
+    <li>
+      <h4>Print any thread's call tree</h4>
+      <p>
+        <code>analysis/trace_tree.py</code> prints a collapsed call tree for any thread over any
+        window, which is the quickest way to answer “what was this process doing here?”:
+      </p>
+<pre><code>T=traces/journey/cpu-eager-single/rank0.*.pt.trace.json.gz
+analysis/trace_tree.py $T --list-threads
+analysis/trace_tree.py $T --annotation 8 --root 'Qwen3DecoderLayer_14$' --depth 12
+analysis/trace_tree.py $T --annotation 8 --root '_process_engine_step' --depth 10</code></pre>
+    </li>
+    <li>
+      <h4>Regenerate the analysis and figures</h4>
+<pre><code>analysis/journey.py --run all          <span class="c"># milestones, step tables, merged Perfetto traces</span>
+analysis/journey_figures.py            <span class="c"># figures/journey/*.png</span></code></pre>
+    </li>
+  </ol>
+
+  <h3>Traps we hit, so you don't have to</h3>
+  <div class="cards">
+    <div class="card red reveal">
+      <h4><code>max_iterations</code> stops the engine to write the trace</h4>
+      <p>
+        When the cap is reached the profiler stops and writes the trace <em>on the engine's main
+        thread</em>. In an earlier run that froze vLLM for 15&nbsp;s mid-request (log: “Max profiling
+        iterations reached” at 17:20:05, “Profiler stopped” at 17:20:20). Set the cap above the
+        steps you need and call <code>stop_profile</code> after the requests finish.
+      </p>
+    </div>
+    <div class="card orange reveal">
+      <h4>Not every process has a profiler</h4>
+      <p>
+        On the CPU in default mode the profiler runs in the API server and the worker. The engine
+        core, where the scheduler lives, has none. Sample it with
+        <code>py-spy record --pid &lt;EngineCore&gt; --format chrometrace --idle --nonblocking</code>, or
+        set <code>VLLM_ENABLE_V1_MULTIPROCESSING=0</code> to pull the worker into the engine core.
+        That second option changes the layout you are studying.
+      </p>
+    </div>
+    <div class="card purple reveal">
+      <h4>Eager and default answer different questions</h4>
+      <p>
+        <code>--enforce-eager</code> shows every module, op and kernel, and is the only way to see
+        what the model runs. It also removes torch.compile and CUDA graphs, so the timing is not
+        how vLLM runs. Use eager for <em>what</em>, default for <em>how fast and in what order</em>.
+      </p>
+    </div>
+    <div class="card blue reveal">
+      <h4><code>/reset_prefix_cache</code> may not exist</h4>
+      <p>
+        In v0.33 it returns 404 unless dev mode is enabled, so a warm-up request can leave cached
+        blocks behind and the measured prefill comes out shorter. Give every warm-up a distinct
+        prefix, and read the scheduled token count back from the step annotation.
+      </p>
+    </div>
+    <div class="card teal reveal">
+      <h4>Host time is not device time</h4>
+      <p>
+        On the GPU every host frame measures the time to <em>issue</em> work. The step annotation
+        can end long before its kernels do (prefill: 34.5 vs 39.1&nbsp;ms). Read kernel rows for
+        device time, and match launches to kernels through their <code>correlation</code> id.
+      </p>
+    </div>
+    <div class="card green reveal">
+      <h4>Line traces up by wall clock</h4>
+      <p>
+        Every torch trace carries <code>baseTimeNanoseconds</code>: absolute time in µs is
+        <code>base/1000 + ts</code>. py-spy stamps time from its own start, so align it on an event
+        both sides see (here: the end of each engine-core wait = the worker's reply).
+      </p>
+    </div>
+  </div>
+
+  <h3>Event types you will see</h3>
+  <div class="table-wrap reveal">
+    <table>
+      <thead><tr><th>category</th><th>what it is</th><th>example</th></tr></thead>
+      <tbody>
+        <tr><td class="name">python_function</td><td>a Python call (needs <code>with_stack</code>)</td><td><code>v1/core/sched/scheduler.py(699): schedule</code></td></tr>
+        <tr><td class="name">user_annotation</td><td>a named range vLLM records</td><td><code>execute_context_1(512)_generation_0(0)</code>: the scheduler's batch for this step</td></tr>
+        <tr><td class="name">cpu_op</td><td>an ATen or custom op on the host (with shapes if <code>record_shapes</code>)</td><td><code>_C::onednn_mm</code>, <code>aten::mul</code>, <code>vllm::unified_attention_with_output</code></td></tr>
+        <tr><td class="name">cuda_runtime / cuda_driver</td><td>the host calling CUDA</td><td><code>cudaLaunchKernel</code>, <code>cudaGraphLaunch</code>, <code>cuLaunchKernel</code> (cuBLAS), <code>cudaEventSynchronize</code></td></tr>
+        <tr><td class="name">kernel / gpu_memcpy</td><td>work on the device, linked to its launch by <code>args.correlation</code></td><td><code>flash_fwd_splitkv_kernel</code>, <code>triton_per_fused_fused_add_rms_norm_0</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout note reveal">
+    <span class="callout-label">Exercises on the real traces</span>
+    <p>
+      (1) In <code>gpu-default-single</code>, find the step where the host launches decode step 2
+      while the GPU is still running the prefill. (2) In <code>cpu-eager-staggered</code>, find B's
+      second chunk and check that its <code>onednn_mm</code> input dims have M = 512. (3) Find
+      the zero-token step after the throwaway request and see what <code>execute_model</code> does
+      in it. (4) In <code>gpu-eager-single</code>, follow one <code>cudaLaunchKernel</code> to its
+      kernel by correlation id and measure the delay. (5) In <code>cpu-default-single</code>,
+      compare the worker's <code>enqueue_output</code> times with the EngineCore output thread's
+      sends.
+    </p>
+  </div>
+</section>
+
+<section class="section wrap" id="corrections">
+  <div class="section-head">
+    <div class="section-num">09 · what changed</div>
+    <h2>Corrections to the earlier write-up</h2>
+    <p class="lead">
+      The first version of this study compared op-class costs and missed parts of how vLLM
+      actually runs. Looking at the request's path turned up these errors. The earlier report is
+      kept as <a href="op-costs.html">op-costs.html</a>, and these corrections apply to it.
+    </p>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table style="min-width:760px;">
+      <thead><tr><th>earlier claim</th><th>what the traces and source show</th></tr></thead>
+      <tbody>
+        <tr><td>Profiled runs were “single process”, so one trace held scheduler and model.</td><td><code>vllm serve</code> always runs the API server and EngineCore as separate processes. <code>VLLM_ENABLE_V1_MULTIPROCESSING=0</code> only kept the CPU's worker inside the EngineCore. vLLM's real CPU layout has three processes.</td></tr>
+        <tr><td>“Engine step = <code>step()</code>” on both devices.</td><td>The GPU runs <code>step_with_batch_queue()</code> with async scheduling by default, in eager mode too. Only the CPU disables it.</td></tr>
+        <tr><td>“The GPU is launch-bound” (74% of each layer's host time without a kernel).</td><td>True in eager mode only. With vLLM's defaults the host finishes early and waits ~2.5&nbsp;ms per step. The GPU is the bottleneck.</td></tr>
+        <tr><td>The slow first request (34.8&nbsp;s CPU / 14.2&nbsp;s GPU) was profiler start-up.</td><td>It was the trace being written when <code>max_iterations</code> was reached mid-request: a 15&nbsp;s stall on the engine's main thread.</td></tr>
+        <tr><td>The 480-vs-512 prefill was a reset that “did not take effect”.</td><td><code>/reset_prefix_cache</code> returned 404 (dev-mode endpoint). The reset never ran on either device. Unique warm-up prefixes are what fixed it.</td></tr>
+        <tr><td>(not mentioned)</td><td>The CPU uses 128-token KV blocks and the GPU 16-token blocks, which changes prefix-cache hits.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Glossary</h3>
+  <dl class="glossary">
+    <div class="term"><dt>API server</dt><dd>The frontend process: uvicorn/FastAPI, the OpenAI layer, <code>AsyncLLM</code>, tokenization, detokenization, streaming.</dd></div>
+    <div class="term"><dt>EngineCore</dt><dd>The engine process: an input thread, the busy loop (scheduler + KV-cache manager + executor), an output thread.</dd></div>
+    <div class="term"><dt>Worker / model runner</dt><dd>Prepares inputs, runs the forward pass, computes logits, samples. A separate process on the CPU, inside the EngineCore on the GPU.</dd></div>
+    <div class="term"><dt>step</dt><dd>One busy-loop iteration: schedule a batch, run one forward pass over it, sample one token per request, update state.</dd></div>
+    <div class="term"><dt>SchedulerOutput</dt><dd>The batch decision for one step: which requests, how many tokens each, which KV blocks, which requests finished.</dd></div>
+    <div class="term"><dt>prefill / decode</dt><dd>Processing prompt tokens (many per step) / producing one output token per running request per step.</dd></div>
+    <div class="term"><dt>chunked prefill</dt><dd>Splitting a prompt across steps so it fits the token budget and running decodes keep going.</dd></div>
+    <div class="term"><dt>KV block</dt><dd>A fixed-size slab of KV cache (16 tokens on this GPU, 128 on this CPU) handed out by the KV-cache manager. Also the unit of prefix caching.</dd></div>
+    <div class="term"><dt>async scheduling</dt><dd>Scheduling and launching step N+1 before step N's result is back, with the sampled token passed on the device. GPU default.</dd></div>
+    <div class="term"><dt>CUDA graph</dt><dd>A captured sequence of kernel launches replayed with one call. FULL graphs cover the whole decode forward; PIECEWISE graphs cover the pieces between attention calls.</dd></div>
+    <div class="term"><dt>torch.compile / Inductor</dt><dd>Traces the model and generates fused kernels: C++ on the CPU, Triton on the GPU. GEMMs and attention stay library or custom-op calls.</dd></div>
+    <div class="term"><dt>eager</dt><dd><code>--enforce-eager</code>: no compilation, no CUDA graphs; every module runs as written.</dd></div>
+  </dl>
+</section>
+
+</main>
+
+<footer class="site-footer wrap">
+  <div class="footer-grid">
+    <div>
+      <div class="footer-mark"><span class="brand-dot"></span>vLLM request journey</div>
+      <p>
+        vLLM 0.33.0 (<code>4ba787ec99</code>), Qwen3-0.6B. CPU leg: Intel i7-12800H, fp32. GPU leg:
+        RTX 4060 Laptop 8&nbsp;GB on an AMD Ryzen 9 7940HS, bf16. Captures:
+        <code>harness/journey_run.sh</code>. Analysis and figures: <code>analysis/journey.py</code>,
+        <code>analysis/journey_figures.py</code>. Raw traces are not committed; client timings,
+        manifests, server logs and milestone tables are in <code>results/journey/</code>.
+      </p>
+      <p>
+        Earlier op-class cost comparison: <a href="op-costs.html">op-costs.html</a>. Long-form
+        notes: <code>docs/01</code>–<code>docs/05</code>.
+      </p>
+    </div>
+    <a class="to-top" href="#top">Back to top ↑</a>
+  </div>
+</footer>
+<script>
+(function () {
+  "use strict";
+
+  /* Reading progress */
+  var bar = document.getElementById("progress");
+  function onScroll() {
+    var doc = document.documentElement;
+    var max = doc.scrollHeight - doc.clientHeight;
+    var pct = max > 0 ? (doc.scrollTop / max) * 100 : 0;
+    if (bar) bar.style.width = pct.toFixed(2) + "%";
+  }
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll);
+  onScroll();
+
+  /* Reveal on first view */
+  var reveals = document.querySelectorAll(".reveal");
+  if ("IntersectionObserver" in window) {
+    var ro = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          e.target.classList.add("in");
+          ro.unobserve(e.target);
+        }
+      });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.06 });
+    reveals.forEach(function (el) { ro.observe(el); });
+  } else {
+    reveals.forEach(function (el) { el.classList.add("in"); });
+  }
+
+  /* Active nav link */
+  var links = Array.prototype.slice.call(document.querySelectorAll(".nav a"));
+  var sections = links
+    .map(function (a) { return document.querySelector(a.getAttribute("href")); })
+    .filter(Boolean);
+  if ("IntersectionObserver" in window && sections.length) {
+    var visible = {};
+    var no = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { visible[e.target.id] = e.isIntersecting; });
+      var current = null;
+      for (var i = 0; i < sections.length; i++) {
+        if (visible[sections[i].id]) current = sections[i].id;
+      }
+      if (current) {
+        links.forEach(function (a) {
+          a.classList.toggle("active", a.getAttribute("href") === "#" + current);
+        });
+      }
+    }, { rootMargin: "-25% 0px -60% 0px", threshold: 0 });
+    sections.forEach(function (s) { no.observe(s); });
+  }
+})();
+</script>
+</body>
+</html>
