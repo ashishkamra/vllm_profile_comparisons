@@ -528,6 +528,12 @@
    "ms_from_send": 34.566
   },
   {
+   "key": "gpu_last",
+   "label": "last GPU kernel of the step finishes",
+   "where": "GPU",
+   "ms_from_send": 39.135
+  },
+  {
    "key": "update",
    "label": "update_from_output: token appended, stop checks",
    "where": "EngineCore \u00b7 main",
@@ -568,12 +574,6 @@
    "label": "client receives the first token",
    "where": "client",
    "ms_from_send": 42.252
-  },
-  {
-   "key": "gpu_last",
-   "label": "last GPU kernel of the step finishes",
-   "where": "GPU",
-   "ms_from_send": 44.377
   }
  ]
 }

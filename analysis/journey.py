@@ -430,10 +430,12 @@ def milestones(run: Run, name: str = "R") -> list[dict]:
         smp = _first(model, r"gpu_model_runner\.py\(\d+\): sample_tokens", s["ts"])
         add("sample", "sample_tokens: sampler picks the token", "model runner", smp)
         if gpu and smp:
-            # kernels launched by this step's host ops: last one to finish
+            # Kernels launched by this step (forward, logits, sampler): last one to
+            # finish. Bounded by the end of sample_tokens, because with async
+            # scheduling the next step's launches follow immediately.
+            smp_end = _first(model, r"gpu_model_runner\.py\(\d+\): sample_tokens", s["ts"], end=True)
             lnch = run.proc("gpu").launchers
-            ks = [e for e in gpu if (lnch.get(e["args"].get("correlation")) or {}).get("ts", 0) >= s["ts"]
-                  and (lnch.get(e["args"].get("correlation")) or {}).get("ts", 0) <= smp + 2000]
+            ks = [e for e in gpu if s["ts"] <= (lnch.get(e["args"].get("correlation")) or {}).get("ts", -1) <= smp_end]
             if ks:
                 add("gpu_last", "last GPU kernel of the step finishes", "GPU", max(e["ts"] + e["dur"] for e in ks))
         wret = None
@@ -671,7 +673,7 @@ def draw_steps(run: Run, out: str, title: str) -> None:
     ax.grid(axis="y", lw=0.5)
     # how long each step took on the host (the annotation span)
     durs = [r["dur_ms"] for r in rows]
-    ax2.bar([r["i"] for r in rows], durs, color=["#EE0000" if r["ctx_tokens"] else "#8a8a8a" for r in rows], width=0.8)
+    ax2.bar([r["i"] for r in rows], durs, color=["#c9a3ff" if r["ctx_tokens"] else "#8a8a8a" for r in rows], width=0.8)
     for r in rows:
         if r["ctx_tokens"] or r["i"] % 4 == 1:
             ax2.text(r["i"], r["dur_ms"], f"{r['dur_ms']:.0f}" if r["dur_ms"] >= 10 else f"{r['dur_ms']:.1f}",

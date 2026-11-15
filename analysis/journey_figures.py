@@ -106,8 +106,8 @@ def main() -> int:
 
     # 4. the scheduler's decisions in the staggered scenario
     for tag, title in [
-        ("cpu-eager-staggered", "CPU: what the scheduler put in each step (4 requests arriving while others decode)"),
-        ("gpu-eager-staggered", "GPU: the same requests, the same scheduler"),
+        ("cpu-eager-staggered", "CPU: what the scheduler put in each step, and what each step cost"),
+        ("gpu-eager-staggered", "GPU (eager): the same requests, the same scheduler decisions, and what each step cost"),
     ]:
         run = J.load_run(tag)
         J.draw_steps(run, os.path.join(OUT, f"j5-steps-{tag}.png"), title)

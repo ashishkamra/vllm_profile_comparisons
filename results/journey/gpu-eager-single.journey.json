@@ -531,7 +531,7 @@
    "key": "gpu_last",
    "label": "last GPU kernel of the step finishes",
    "where": "GPU",
-   "ms_from_send": 41.801
+   "ms_from_send": 41.718
   },
   {
    "key": "update",
