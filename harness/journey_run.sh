@@ -33,7 +33,8 @@ DEVICE=${DEVICE:?set DEVICE=cpu|gpu}
 VARIANT=${VARIANT:-ref}
 MODE=${MODE:?set MODE=default|eager}
 SCENARIO=${SCENARIO:?set SCENARIO=single|staggered}
-TAG="$DEVICE-$MODE-$SCENARIO"
+# Reference-weight runs keep the short tag; quantized runs carry the variant.
+if [ "$VARIANT" = "ref" ]; then TAG="$DEVICE-$MODE-$SCENARIO"; else TAG="$DEVICE-$VARIANT-$MODE-$SCENARIO"; fi
 TRACE_DIR="$R/traces/journey/$TAG"
 RES_DIR="$R/results/journey"
 LOG="$RES_DIR/$TAG.serve.log"
