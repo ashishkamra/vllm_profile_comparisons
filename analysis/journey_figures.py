@@ -45,9 +45,25 @@ def window_request(run, name="R", pad=0.02):
     return lo - pad * span, hi + pad * span
 
 
+WEIGHTS = {"ref": {"cpu": "", "gpu": ""}, "quant": {"cpu": "int8-", "gpu": "fp8-"}}
+LABEL = {"ref": {"cpu": "fp32", "gpu": "bf16"}, "quant": {"cpu": "int8 W8A8", "gpu": "fp8 W8A8"}}
+
+
 def main() -> int:
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--weights", choices=sorted(WEIGHTS), default="ref",
+                    help="ref: fp32 CPU / bf16 GPU runs; quant: int8 CPU / fp8 GPU runs")
+    w = ap.parse_args().weights
     os.makedirs(OUT, exist_ok=True)
     legends = {}
+
+    def T(tag: str) -> str:
+        dev, rest = tag.split("-", 1)
+        return f"{dev}-{WEIGHTS[w][dev]}{rest}"
+
+    def L(tag: str, title: str) -> str:
+        return title if w == "ref" else f"{title} [{LABEL[w][tag.split('-', 1)[0]]}]"
 
     # 1. one whole request, real process layout
     for tag, unit, title in [
@@ -56,32 +72,32 @@ def main() -> int:
         ("cpu-eager-single", "s", "CPU, eager, worker inside the engine core: the same request"),
         ("gpu-eager-single", "ms", "GPU, eager: the same request"),
     ]:
-        run = J.load_run(tag)
+        run = J.load_run(T(tag))
         lo, hi = window_request(run)
-        J.draw_lanes(run, lo, hi, title, os.path.join(OUT, f"j1-request-{tag}.png"), unit=unit)
-        print("wrote", f"j1-request-{tag}.png")
+        J.draw_lanes(run, lo, hi, L(tag, title), os.path.join(OUT, f"j1-request-{T(tag)}.png"), unit=unit)
+        print("wrote", f"j1-request-{T(tag)}.png")
 
     # 2. first token: inbound and outbound zooms
     for tag in ("cpu-eager-single", "gpu-default-single", "cpu-default-single", "gpu-eager-single"):
-        run = J.load_run(tag)
+        run = J.load_run(T(tag))
         ms = {m["key"]: m for m in J.milestones(run, "R")}
         inbound = ["client_send", "http", "create_completion", "tokenize", "tokenize_end", "add_request",
                    "zmq_send", "engine_recv", "sched_add", "schedule", "worker_rpc", "step_start", "gpu_first"]
         marks, leg = ms_marks(run, inbound)
         lo = ms["client_send"]["t"] - 300
         hi = (ms.get("gpu_first") or ms["step_start"])["t"] + 1200
-        J.draw_lanes(run, lo, hi, f"{tag}: from the client's send to the start of the prefill step",
-                     os.path.join(OUT, f"j2-inbound-{tag}.png"), marks=marks, unit="ms")
-        legends[f"j2-inbound-{tag}"] = leg
+        J.draw_lanes(run, lo, hi, f"{T(tag)}: from the client's send to the start of the prefill step",
+                     os.path.join(OUT, f"j2-inbound-{T(tag)}.png"), marks=marks, unit="ms")
+        legends[f"j2-inbound-{T(tag)}"] = leg
         outbound = ["sample", "gpu_last", "worker_return", "update", "engine_send", "api_recv",
                     "process_outputs", "detokenize", "http_send", "client_first"]
         marks, leg = ms_marks(run, outbound)
         lo = ms["sample"]["t"] - 1500
         hi = ms["client_first"]["t"] + 600
-        J.draw_lanes(run, lo, hi, f"{tag}: from the sampler to the client's first token",
-                     os.path.join(OUT, f"j3-outbound-{tag}.png"), marks=marks, unit="ms")
-        legends[f"j3-outbound-{tag}"] = leg
-        print("wrote", f"j2/j3 {tag}")
+        J.draw_lanes(run, lo, hi, f"{T(tag)}: from the sampler to the client's first token",
+                     os.path.join(OUT, f"j3-outbound-{T(tag)}.png"), marks=marks, unit="ms")
+        legends[f"j3-outbound-{T(tag)}"] = leg
+        print("wrote", f"j2/j3 {T(tag)}")
 
     # 3. decode steps, the four configurations side by side
     for tag, first, n, title in [
@@ -90,7 +106,7 @@ def main() -> int:
         ("gpu-eager-single", 8, 3, "GPU eager: three decode steps -- the host launches every kernel"),
         ("gpu-default-single", 7, 5, "GPU defaults: prefill, then decode steps replayed as CUDA graphs, scheduled one step ahead"),
     ]:
-        run = J.load_run(tag)
+        run = J.load_run(T(tag))
         r = run.request("R")
         st = [s for s in J.steps(run) if s["ts"] >= r["t_send"] * 1e6]
         if tag == "gpu-default-single":
@@ -101,19 +117,19 @@ def main() -> int:
             # n decode steps, starting at R's second decode (st[0] is the prefill)
             lo = st[2]["ts"] - 3000
             hi = st[2 + n]["ts"] + 2000
-        J.draw_lanes(run, lo, hi, title, os.path.join(OUT, f"j4-decode-{tag}.png"), unit="ms")
-        print("wrote", f"j4-decode-{tag}.png")
+        J.draw_lanes(run, lo, hi, L(tag, title), os.path.join(OUT, f"j4-decode-{T(tag)}.png"), unit="ms")
+        print("wrote", f"j4-decode-{T(tag)}.png")
 
     # 4. the scheduler's decisions in the staggered scenario
     for tag, title in [
         ("cpu-eager-staggered", "CPU: what the scheduler put in each step, and what each step cost"),
         ("gpu-eager-staggered", "GPU (eager): the same requests, the same scheduler decisions, and what each step cost"),
     ]:
-        run = J.load_run(tag)
-        J.draw_steps(run, os.path.join(OUT, f"j5-steps-{tag}.png"), title)
-        print("wrote", f"j5-steps-{tag}.png")
+        run = J.load_run(T(tag))
+        J.draw_steps(run, os.path.join(OUT, f"j5-steps-{T(tag)}.png"), L(tag, title))
+        print("wrote", f"j5-steps-{T(tag)}.png")
 
-    with open(os.path.join(J.RESULTS, "figure-milestones.json"), "w") as f:
+    with open(os.path.join(J.RESULTS, "figure-milestones.json" if w == "ref" else f"figure-milestones-{w}.json"), "w") as f:
         json.dump(legends, f, indent=1)
     return 0
 
