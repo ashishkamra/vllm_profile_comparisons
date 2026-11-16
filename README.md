@@ -311,7 +311,9 @@ sustained load overheats it, so the GPU leg is profiled with seconds of load ins
 - [x] Request journey on both devices, default and eager, single and staggered requests
       (`report/index.html`)
 - [x] CPU-vs-GPU op-class comparison, reference weights (`report/op-costs.html`)
-- [ ] GPU leg: FP8 W8A8, and GuideLLM throughput numbers
+- [x] Comparable 8-bit pair (CPU int8, GPU fp8) through every journey capture (`report/index.html#quant`)
+- [x] KV-cache management: block-level probe, prefix-sharing and pressure scenarios (`report/index.html#kvcache`)
+- [ ] GPU leg: GuideLLM throughput numbers
 
 Numbers land in `results/` (JSON/CSV only — raw traces are gitignored, see
 `.gitignore`). Everything here is measurement code, not a vLLM contribution.
