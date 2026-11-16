@@ -831,6 +831,8 @@
     <a href="#model">Forward pass</a>
     <a href="#scheduler">Scheduler</a>
     <a href="#stream">Way back</a>
+    <a href="#quant">8-bit</a>
+    <a href="#kvcache">KV cache</a>
     <a href="#diy">Do it yourself</a>
     <a href="#corrections">Corrections</a>
   </nav>
@@ -941,7 +943,9 @@
     We sent the same request to vLLM on a laptop CPU and on an RTX&nbsp;4060, recorded every
     process with the profiler, and put all the traces on one clock. This guide follows that
     request from the HTTP socket to the model and back, one function at a time, and shows which
-    parts of vLLM change when the device changes.
+    parts of vLLM change when the device changes. It then repeats everything with comparable
+    8-bit weights (int8 on the CPU, fp8 on the GPU) and follows the KV cache block by block:
+    sharing, eviction and preemption.
   </p>
   <p class="hero-lead" style="font-size:1rem;color:var(--text-muted);">
     Every claim here comes from a trace or from a line of vLLM's source, and is cited. The
@@ -958,21 +962,21 @@
       <div class="stat-label">from the client's send to the first engine step, on both</div>
     </div>
     <div class="stat" role="listitem">
-      <div class="stat-value">1.5 s <small>vs</small> 42 ms</div>
-      <div class="stat-label">time to first token for a 512-token prompt</div>
+      <div class="stat-value">0.80 s <small>vs</small> 48 ms</div>
+      <div class="stat-label">time to first token, 512-token prompt, int8 CPU vs fp8 GPU</div>
     </div>
     <div class="stat" role="listitem">
-      <div class="stat-value">137 <small>vs</small> 6.4 ms</div>
-      <div class="stat-label">per output token, vLLM's default configuration</div>
+      <div class="stat-value">86 <small>vs</small> 4.7 ms</div>
+      <div class="stat-label">per output token, int8 CPU vs fp8 GPU, vLLM defaults</div>
     </div>
   </div>
 
   <div class="hero-meta">
     <span><strong>vLLM</strong> 0.33.0 · 4ba787ec99</span>
     <span><strong>Model</strong> Qwen3-0.6B · 28 layers</span>
-    <span><strong>CPU leg</strong> i7-12800H · fp32</span>
-    <span><strong>GPU leg</strong> RTX 4060 Laptop 8&nbsp;GB on a Ryzen 9 7940HS · bf16</span>
-    <span><strong>Captures</strong> 8 · {cpu, gpu} × {default, eager} × {single, staggered}</span>
+    <span><strong>CPU leg</strong> i7-12800H · fp32 and int8 W8A8</span>
+    <span><strong>GPU leg</strong> RTX 4060 Laptop 8&nbsp;GB on a Ryzen 9 7940HS · bf16 and fp8 W8A8</span>
+    <span><strong>Captures</strong> 21 · {cpu, gpu} × {reference, 8-bit} × {default, eager} × {single, staggered}, plus KV-cache scenarios</span>
   </div>
 </section>
 
@@ -1253,6 +1257,16 @@
       This is the request's whole path as the traces recorded it: every hop between threads and
       processes, with the vLLM function that does the work and the moment it happened. Times
       are milliseconds after the client sent the request.
+    </p>
+  </div>
+
+  <div class="callout note reveal">
+    <span class="callout-label">Chapters 3–7 use reference weights</span>
+    <p>
+      The numbers in chapters 3–7 come from each device's reference precision: fp32 on the CPU,
+      bf16 on the GPU. Chapter 8 repeats every capture with the comparable 8-bit pair (int8 CPU,
+      fp8 GPU). The path, the processes and the scheduler's decisions are identical; the model's
+      time changes.
     </p>
   </div>
 
@@ -1879,9 +1893,453 @@ qwen3.<span class="f">compute_logits</span> → LogitsProcessor → lm_head   <s
   </div>
 </section>
 
+<section class="section wrap" id="quant">
+  <div class="section-head">
+    <div class="section-num">08 · the comparable pair</div>
+    <h2>int8 on the CPU, fp8 on the GPU: what 8-bit weights change in vLLM</h2>
+    <p class="lead">
+      Chapters 3–7 used each device's reference precision (fp32 on the CPU, bf16 on the GPU). For
+      a like-for-like comparison, both devices should run 8-bit weights <em>and</em> 8-bit
+      activations (W8A8): int8 on the CPU, which has no fp8 path, and fp8 on the GPU. Every
+      capture was repeated with those models. This chapter shows what changes inside vLLM, and
+      what does not.
+    </p>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table style="min-width:860px;">
+      <caption>The two quantized models, as vLLM loads and runs them · server logs and traces of the int8/fp8 runs</caption>
+      <thead><tr><th></th><th><span class="devtag cpu">cpu</span>int8 W8A8</th><th><span class="devtag gpu">gpu</span>fp8 W8A8</th></tr></thead>
+      <tbody>
+        <tr><td class="name">checkpoint</td><td><code>nytopop/Qwen3-0.6B.w8a8</code> (compressed-tensors)</td><td><code>RedHatAI/Qwen3-0.6B-FP8-dynamic</code> (compressed-tensors)</td></tr>
+        <tr><td class="name">kernel vLLM selects</td><td><code>CPUInt8ScaledMMLinearKernel</code> for <code>CompressedTensorsW8A8Int8</code></td><td><code>CutlassFP8ScaledMMLinearKernel</code> for <code>CompressedTensorsW8A8Fp8</code></td></tr>
+        <tr><td class="name">per linear layer, eager</td><td><code>_C::dynamic_scaled_int8_quant</code> (per-token scale) → <code>_C::onednn_scaled_mm</code></td><td><code>dynamic_per_token_scaled_fp8_quant_kernel</code> → CUTLASS sm89 e4m3 GEMM</td></tr>
+        <tr><td class="name">per linear layer, compiled</td><td>same two ops (oneDNN calls are not fused)</td><td>quantization <strong>fused</strong> into the Triton kernel that produces the input (see below), then the CUTLASS GEMM</td></tr>
+        <tr><td class="name">still high precision</td><td><code>lm_head</code> (fp32 <code>_C::onednn_mm</code>), attention, norms, KV cache (fp32)</td><td><code>lm_head</code> (bf16 CUTLASS), attention, norms, KV cache (bf16)</td></tr>
+        <tr><td class="name">source</td><td><span class="src">model_executor/kernels/linear/scaled_mm/cpu.py:188</span></td><td><span class="src">model_executor/kernels/linear/scaled_mm/cutlass.py</span></td></tr>
+        <tr><td class="name">memory effect</td><td>KV pool unchanged: a fixed 4&nbsp;GiB → 18,688 tokens</td><td>weights 0.71&nbsp;GiB instead of 1.12 → KV pool 53,008 tokens instead of 48,768</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table style="min-width:900px;">
+      <caption>Reference vs 8-bit, one request (512 prompt / 32 output) · median per decode step · ms · results/journey/phase-medians.json</caption>
+      <thead>
+        <tr><th>phase</th><th class="num">cpu fp32<br/>eager</th><th class="num">cpu int8<br/>eager</th><th class="num">cpu fp32<br/>default</th><th class="num">cpu int8<br/>default</th><th class="num">gpu bf16<br/>eager</th><th class="num">gpu fp8<br/>eager</th><th class="num">gpu bf16<br/>default</th><th class="num">gpu fp8<br/>default</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="name">model forward (host)</td><td class="num">124.7</td><td class="num hl">62.9</td><td class="num">108.7</td><td class="num hl">57.8</td><td class="num">18.4</td><td class="num hl">27.1</td><td class="num">0.34</td><td class="num">0.30</td></tr>
+        <tr><td class="name">compute_logits (host)</td><td class="num">24.4</td><td class="num">20.7</td><td class="num">24.4</td><td class="num hl">24.7</td><td class="num">0.06</td><td class="num">0.09</td><td class="num">0.10</td><td class="num">0.08</td></tr>
+        <tr><td class="name">GPU kernel time per decode step</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">6.26</td><td class="num">4.95</td><td class="num">6.64</td><td class="num hl">4.56</td></tr>
+        <tr><td class="name">kernel launches per decode step</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">379</td><td class="num hl">491</td><td class="num">13</td><td class="num">13</td></tr>
+        <tr><td class="name">wait for the GPU</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">0.01</td><td class="num">0.01</td><td class="num">2.45</td><td class="num">1.46</td></tr>
+        <tr><td class="name">prefill step (host annotation)</td><td class="num">1,467</td><td class="num">751</td><td class="num">1,498</td><td class="num">788</td><td class="num">27.6</td><td class="num">36.2</td><td class="num">26.3</td><td class="num">33.3</td></tr>
+        <tr><td class="name">prefill GPU kernel time</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">23.8</td><td class="num">20.8</td><td class="num">23.2</td><td class="num">19.8</td></tr>
+        <tr class="total"><td class="name">client inter-token latency</td><td class="num">152.0</td><td class="num">88.0</td><td class="num">137.4</td><td class="num">85.9</td><td class="num">20.7</td><td class="num">29.6</td><td class="num">6.4</td><td class="num">4.7</td></tr>
+        <tr class="total"><td class="name">client TTFT</td><td class="num">1,482</td><td class="num">760</td><td class="num">1,508</td><td class="num">799</td><td class="num">65.9</td><td class="num">83.6</td><td class="num">42.3</td><td class="num">47.7</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="cards">
+    <div class="card red reveal">
+      <div class="card-kicker"><span class="devtag cpu">cpu</span>int8 halves the model</div>
+      <h4>…and leaves <code>lm_head</code> alone</h4>
+      <p>
+        The 112 quantized projections per step read a quarter of the bytes they read in fp32, so
+        the forward pass halves (108.7 → 57.8&nbsp;ms) and so does the prefill. The vocabulary
+        projection is not quantized: <code>compute_logits</code> stays at ~24&nbsp;ms and grows
+        from 18% to 29% of a decode step. On the CPU, the next thing to speed up is the one
+        layer the quantization recipe skipped.
+      </p>
+    </div>
+    <div class="card teal reveal">
+      <div class="card-kicker"><span class="devtag gpu">gpu</span>fp8 makes the GPU faster…</div>
+      <h4>…and the host slower</h4>
+      <p>
+        On the device, fp8 wins everywhere: decode kernels 6.6 → 4.6&nbsp;ms, prefill
+        23.2 → 19.8&nbsp;ms. But each fp8 linear layer needs its activations quantized first. In eager
+        mode that is one more kernel per layer: 491 launches per step instead of 379, so the
+        launch-bound host gets slower (20.7 → 29.6&nbsp;ms per token). With CUDA graphs launches are
+        free, and the device gain shows: 6.4 → 4.7&nbsp;ms per token.
+      </p>
+    </div>
+    <div class="card orange reveal">
+      <div class="card-kicker"><span class="devtag gpu">gpu</span>why fp8 TTFT got worse</div>
+      <h4>The prefill is host-bound</h4>
+      <p>
+        No CUDA graph covers a 512-token batch, so the prefill's kernels are launched one by one
+        even in default mode. The fp8 prefill needs 19.8&nbsp;ms on the GPU but 33.3&nbsp;ms of host
+        time to issue: the device waits for the host, and TTFT rises from 42 to 48&nbsp;ms despite
+        faster kernels. On this laptop, larger prefills or more concurrency would be needed for
+        fp8's compute advantage to show in TTFT.
+      </p>
+    </div>
+  </div>
+
+  <h3>What torch.compile does with the quantization step</h3>
+  <div class="prose">
+    <p>
+      Dynamic W8A8 means every activation is quantized per token, at run time, just before each
+      GEMM: find the row's max (<code>abs</code>, <code>amax</code>), compute a scale, divide,
+      clamp, cast. In eager mode that is its own kernel (or op) in front of every projection.
+      In the compiled GPU step, Inductor fuses it into whatever produced the activation. The
+      kernel names list the fused ops:
+    </p>
+  </div>
+  <div class="table-wrap reveal">
+    <table style="min-width:820px;">
+      <caption>GPU decode step, compiled: kernels that differ between bf16 and fp8 (count per step) · gpu-default-single vs gpu-fp8-default-single</caption>
+      <thead><tr><th>kernel</th><th class="num">bf16</th><th class="num">fp8</th><th>what it is</th></tr></thead>
+      <tbody>
+        <tr><td><code>internal::gemvx</code> (cuBLAS) + CUTLASS <code>wmma_tensorop_bf16</code></td><td class="num">84 + 28</td><td class="num">0</td><td>the four bf16 projections per layer</td></tr>
+        <tr><td>CUTLASS <code>enable_sm89_to_sm90 … float_e4m3_t</code></td><td class="num">0</td><td class="num">112</td><td>the same four projections as fp8 GEMMs with per-token × per-channel scales</td></tr>
+        <tr><td><code>triton_per_fused_fused_add_rms_norm</code></td><td class="num">28 + 28</td><td class="num">0</td><td>residual add + RMSNorm</td></tr>
+        <tr><td><code>triton_per_fused__to_copy_abs_amax_clamp_cutlass_scaled_mm_div_fused_add_rms_norm…</code></td><td class="num">0</td><td class="num">28 + 27</td><td>residual add + RMSNorm <strong>+ quantize</strong> for the next GEMM, in one kernel</td></tr>
+        <tr><td><code>triton_poi_fused_mul_silu_slice</code></td><td class="num">28</td><td class="num">0</td><td>SiLU-and-mul</td></tr>
+        <tr><td><code>triton_red_fused__to_copy_abs_amax_clamp_cutlass_scaled_mm_div_mul_reciprocal_silu_slice…</code></td><td class="num">0</td><td class="num">28</td><td>SiLU-and-mul <strong>+ quantize</strong> for <code>down_proj</code></td></tr>
+        <tr><td><code>triton_red_fused__to_copy_abs_amax_clamp_…_view_0</code></td><td class="num">0</td><td class="num">28</td><td>quantize the attention output for <code>o_proj</code>: nothing to fuse into, since attention is a custom op</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j4-decode-cpu-int8-default-single.png" alt="CPU int8 default: two decode steps in the worker; model forward is about 58 ms and compute_logits about 25 ms of each 86 ms step." loading="lazy" />
+    <figcaption>
+      <strong>CPU int8, vLLM defaults: two decode steps.</strong> Compare with the fp32 figure in
+      chapter 4: the red forward block halves, the pink <code>compute_logits</code> block does not.
+      The process layout, the engine core's spin-wait and the output path are unchanged.
+    </figcaption>
+  </figure>
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/j4-decode-gpu-fp8-eager-single.png" alt="GPU fp8 eager: three decode steps, each about 29 ms of host-side kernel launching while the GPU is mostly idle." loading="lazy" />
+    <figcaption>
+      <strong>GPU fp8, eager: three decode steps.</strong> ~29&nbsp;ms of host work per token against
+      ~5&nbsp;ms of GPU work. The extra quantization kernel per layer makes eager mode slower than
+      in bf16, though every kernel is faster. That is a reminder that eager-mode timings say
+      little about how the quantized model serves.
+    </figcaption>
+  </figure>
+
+  <div class="callout insight reveal">
+    <span class="callout-label">What did not change</span>
+    <p>
+      The process layout, the engine loop, the API server's path, the milestone timings up to
+      the first engine step (5.8&nbsp;ms CPU, 9.6&nbsp;ms GPU), the KV block sizes, and every
+      scheduling decision: the staggered scenario produced the same sequence of
+      <code>execute_context_…_generation_…</code> steps with 8-bit weights as with reference
+      weights, on both devices. Quantization is a model-runner concern; the scheduler and the
+      KV-cache manager never see it. (The GPU's KV pool grew, because the weights shrank.)
+    </p>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table>
+      <caption>The comparable pair at a glance (default configuration, one 512/32 request)</caption>
+      <thead><tr><th></th><th class="num">cpu int8</th><th class="num">gpu fp8</th><th class="num">ratio</th></tr></thead>
+      <tbody>
+        <tr><td class="name">client send → first engine step</td><td class="num">6.7 ms</td><td class="num">9.6 ms</td><td class="num">—</td></tr>
+        <tr><td class="name">prefill, 512 tokens</td><td class="num">788 ms</td><td class="num">33 ms host / 20 ms GPU</td><td class="num">24–40×</td></tr>
+        <tr><td class="name">TTFT</td><td class="num">799 ms</td><td class="num">47.7 ms</td><td class="num">17×</td></tr>
+        <tr><td class="name">inter-token latency</td><td class="num">85.9 ms</td><td class="num">4.7 ms</td><td class="num">18×</td></tr>
+        <tr><td class="name">KV cache capacity</td><td class="num">18,688 tokens</td><td class="num">53,008 tokens</td><td class="num">2.8×</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="section wrap" id="kvcache">
+  <div class="section-head">
+    <div class="section-num">09 · KV-cache management</div>
+    <h2>Blocks, block tables, prefix sharing, eviction and preemption</h2>
+    <p class="lead">
+      Every token a request has seen leaves a key and a value in every layer, and vLLM must keep
+      them for as long as the request runs. How it stores them — in fixed-size blocks, handed out
+      by the scheduler, shared between requests, cached after they finish and reclaimed under
+      pressure — is the idea vLLM was built around. This chapter follows those blocks, one step
+      at a time, on both devices.
+    </p>
+  </div>
+
+  <div class="callout note reveal">
+    <span class="callout-label">How these block-level views were recorded</span>
+    <p>
+      The profiler records when the scheduler allocates blocks, not <em>which</em> blocks: tensor
+      values are not in a trace. A small probe (<code>harness/kvprobe/sitecustomize.py</code>,
+      enabled with <code>KV_PROBE=1</code>) wraps <code>Scheduler.schedule()</code> and, after every
+      step, writes each running request's block table, new blocks, prefix hits, preemptions,
+      finished requests, evictions and the free-block count to
+      <code>results/journey/&lt;run&gt;.kvprobe.jsonl</code>. <code>analysis/kvcache.py</code> turns
+      that into the step logs (<code>*.kvstory.txt</code>) and figures below. All runs here use the
+      int8 (CPU) and fp8 (GPU) models in vLLM's default configuration.
+    </p>
+  </div>
+
+  <h3>Two halves: the scheduler owns the blocks, the worker owns the memory</h3>
+  <div class="procmap reveal" role="img" aria-label="KV cache: scheduler-side manager and worker-side tensors">
+    <div class="proc">
+      <h4>EngineCore: KVCacheManager</h4>
+      <div class="proc-sub">bookkeeping only, no tensors · <span class="src">v1/core/</span></div>
+      <div class="thread main"><b>BlockPool</b><span>every block's id, <code>ref_cnt</code> and hash; a doubly linked free queue in eviction order; a hash → block map for prefix caching <span class="src">block_pool.py:137</span></span></div>
+      <div class="thread io"><b>per request</b><span>its list of block ids (the block table) and its chain of block hashes <span class="src">kv_cache_utils.py:953</span></span></div>
+      <div class="thread"><b>called by schedule()</b><span><code>get_computed_blocks</code> (prefix hit) and <code>allocate_slots</code> (new blocks) <span class="src">kv_cache_manager.py:266, 380</span></span></div>
+    </div>
+    <div class="wire">block ids,<br/>every step</div>
+    <div class="proc">
+      <h4>Worker: block table + slot mapping</h4>
+      <div class="proc-sub">turns ids into addresses · <span class="src">v1/worker/block_table.py</span></div>
+      <div class="thread main"><b>_update_states</b><span>new requests: <code>add_row(block_ids)</code>; running: <code>append_row(new_block_ids)</code> <span class="src">gpu_model_runner.py:1454</span></span></div>
+      <div class="thread io"><b>_prepare_inputs</b><span><code>commit_block_table</code> copies it to the device; <code>compute_slot_mapping</code>: slot = block_id × block_size + position mod block_size <span class="src">:1944, :2148</span></span></div>
+    </div>
+    <div class="wire dev">slot_mapping,<br/>block_table</div>
+    <div class="proc gpu">
+      <h4>Attention: the KV tensors</h4>
+      <div class="proc-sub">one per layer · <code>[num_blocks, kv_heads, block_size, 2×head]</code></div>
+      <div class="thread dev"><b>write</b><span><code>reshape_and_cache_flash</code> / <code>cpu_attn_reshape_and_cache</code> scatter the new K,V to their slots <span class="src">flash_attn.py:1457</span></span></div>
+      <div class="thread dev"><b>read</b><span>FlashAttention / <code>cpu_attention_with_kv_cache</code> gather each request's past K,V through its block table <span class="src">flash_attn.py:1417</span></span></div>
+    </div>
+  </div>
+
+  <div class="table-wrap reveal">
+    <table>
+      <caption>What a block is on each device (Qwen3-0.6B: 28 layers × 8 KV heads × 128 dims)</caption>
+      <thead><tr><th></th><th class="num">cpu</th><th class="num">gpu</th></tr></thead>
+      <tbody>
+        <tr><td class="name">tokens per block</td><td class="num">128</td><td class="num">16</td></tr>
+        <tr><td class="name">KV dtype (follows the activations)</td><td class="num">fp32</td><td class="num">bf16</td></tr>
+        <tr><td class="name">bytes per token, all layers</td><td class="num">229,376</td><td class="num">114,688</td></tr>
+        <tr><td class="name">bytes per block, all layers</td><td class="num">28 MiB</td><td class="num">1.75 MiB</td></tr>
+        <tr><td class="name">blocks in the pool (default)</td><td class="num">146</td><td class="num">3,169–3,313 (varies with free memory at start-up)</td></tr>
+        <tr><td class="name">block 0</td><td class="num" colspan="2">the <em>null block</em>, reserved as a placeholder and never handed out (<span class="src">block_pool.py:191</span>)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>allocate_slots: what happens to a request's blocks each step</h3>
+  <ol class="steps">
+    <li>
+      <h4>On admission: look up the prefix</h4>
+      <p>
+        Each full block of a request's tokens gets a hash that chains in the previous block's hash
+        (<code>hash_block_tokens</code>, <span class="src">kv_cache_utils.py:707</span>), so a hash
+        identifies the <em>whole prefix</em> up to that block. <code>get_computed_blocks</code> walks
+        the chain in the pool's hash map and returns the longest run of cached blocks. It caps the
+        hit at <code>num_tokens − 1</code>: the last prompt token is always recomputed, because the
+        model needs its logits (<span class="src">kv_cache_manager.py:295</span>).
+      </p>
+    </li>
+    <li>
+      <h4>Every step: allocate only what the new tokens need</h4>
+      <p>
+        <code>allocate_slots(request, num_new_tokens)</code> counts how many more blocks the request
+        needs to hold <code>computed + new</code> tokens, checks the free count, takes cached hits
+        out of the free queue (<code>touch</code>: <code>ref_cnt += 1</code>), pops fresh blocks from
+        the front of the free queue, and hashes any block that just became full
+        (<code>cache_blocks</code>). A decoding request needs a new block only when its sequence
+        crosses a block boundary: every 16 tokens on the GPU, every 128 on the CPU.
+      </p>
+    </li>
+    <li>
+      <h4>On finish: free in reverse, keep the hashes</h4>
+      <p>
+        <code>free_blocks</code> decrements each block's <code>ref_cnt</code>. Blocks reaching zero go back to
+        the free queue but <em>keep their hash</em>, so they stay findable. Unhashed blocks (a
+        partly filled tail) go to the <em>front</em> to be reused first. Hashed blocks go to the
+        <em>back</em>, tail block first, so the least recently used, deepest blocks of a prefix are
+        evicted before its head (<span class="src">block_pool.py:816</span>). A cached block is only
+        evicted when <code>get_new_blocks</code> pops it for someone else
+        (<span class="src">block_pool.py:706, 769</span>).
+      </p>
+    </li>
+    <li>
+      <h4>When there is no room: preempt</h4>
+      <p>
+        If <code>allocate_slots</code> returns <code>None</code> for a running request, the scheduler
+        preempts the <em>last</em> request in its running list (FCFS policy), frees all its blocks,
+        sets its <code>num_computed_tokens</code> to 0, and puts it back at the front of the waiting
+        queue (<span class="src">scheduler.py:912–977, 1799</span>). When it is re-admitted, its own
+        freed blocks may still be cached, so its prefix-cache lookup can recover part of the work.
+      </p>
+    </li>
+  </ol>
+
+  <h3>Prefix sharing: two requests, one copy of the prefix</h3>
+  <div class="prose">
+    <p>
+      The <code>prefix</code> scenario sends four 512-token prompts that begin with the same 384
+      tokens (sent as token IDs, so the boundary is exact): P1, then P2 while P1 is still
+      decoding, then P3 after both have finished, then P4, which repeats P1's prompt exactly.
+      The probe's log, condensed (<code>results/journey/*-default-prefix.kvstory.txt</code>):
+    </p>
+  </div>
+<pre><code><span class="c"># CPU, 128-token blocks                                    free/146</span>
+P1 admitted: hit 0,   blocks [1 2 3 4]                        141   <span class="c"># 512 tokens = 4 full blocks, all hashed</span>
+P1 +block [5]                                                 140   <span class="c"># first output token crosses into block 5</span>
+P2 admitted: hit 384, blocks [<b>1 2 3</b> 6]   shared {1,2,3: ref_cnt 2}  139   <span class="c"># one copy of the prefix, two block tables</span>
+P1, P2 finished                                               145   <span class="c"># blocks free, but 1-4 and 6 keep their hashes</span>
+P3 admitted: hit 384, blocks [1 2 3 <b>7</b>]                       141   <span class="c"># 7 = P2's unhashed tail, reused first</span>
+P4 admitted: hit 384, blocks [1 2 3 <b>5</b>]                       141   <span class="c"># same prompt as P1, yet block 4 is not reused</span>
+
+<span class="c"># GPU, 16-token blocks                                     free/3169</span>
+P1 admitted: hit 0,   blocks [5 … 36]                        3136   <span class="c"># 32 blocks; 1-4 hold the warm-up's cached prefix</span>
+P2 admitted: hit 384, blocks [<b>5 … 28</b> 38 … 45]  24 blocks shared 3127
+P3 admitted: hit 384, blocks [5 … 28 <b>46 37</b> 47 … 52]           3136   <span class="c"># 46, 37: P2's and P1's unhashed tails</span>
+P4 admitted: hit <b>496</b>, blocks [5 … 35 53]                       3136   <span class="c"># only the last 16-token block is recomputed</span></code></pre>
+
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/k-gpu-fp8-default-prefix-blocks.png" alt="GPU block map for the prefix scenario: P1 and P2 share blocks 5 to 28 while both run; P3 and P4 later reuse those blocks from the cache." loading="lazy" />
+    <figcaption>
+      <strong>GPU: which request holds each physical block, step by step.</strong> Striped cells
+      are held by two requests at once (<code>ref_cnt = 2</code>): P2's first 24 blocks <em>are</em>
+      P1's. After both finish, the prefix blocks sit in the free queue with their hashes intact,
+      and P3 and P4 pick them up again. Only the steps that scheduled work are shown.
+    </figcaption>
+  </figure>
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/k-cpu-int8-default-prefix-blocks.png" alt="CPU block map for the prefix scenario: the same pattern with 128-token blocks, blocks 1 to 3 shared." loading="lazy" />
+    <figcaption>
+      <strong>CPU: the same scenario with 128-token blocks.</strong> Same algorithm, an eighth as
+      many blocks. A 32-token request (the warm-up and the throwaway request) never fills a block,
+      so it is never hashed and its block 1 is simply reused.
+    </figcaption>
+  </figure>
+
+  <div class="cards">
+    <div class="card blue reveal">
+      <div class="card-kicker">the last-token rule, at block granularity</div>
+      <h4>P4 recomputes a whole block</h4>
+      <p>
+        P4's prompt is identical to P1's and all four of P1's blocks are cached, yet the CPU
+        recomputes 128 tokens and the GPU 16. The hit is capped at 511 tokens, and the cache
+        works in whole blocks, so the last block is recomputed — into a <em>new</em> block (5 on
+        the CPU, 53 on the GPU), leaving two blocks with the same hash. The bigger the block, the
+        more a cache hit leaves on the table.
+      </p>
+    </div>
+    <div class="card teal reveal">
+      <div class="card-kicker">sharing is copy-free</div>
+      <h4>P2's prefill costs a quarter</h4>
+      <p>
+        With 384 of 512 tokens cached, P2's prefill computes 128 tokens: CPU TTFT 337&nbsp;ms against
+        666&nbsp;ms for P1 (int8, default). The cached blocks are not copied. P2's block table simply
+        lists the same block ids, and attention reads them through it.
+      </p>
+    </div>
+    <div class="card orange reveal">
+      <div class="card-kicker">free is not forgotten</div>
+      <h4>Free blocks are the prefix cache</h4>
+      <p>
+        vLLM has no separate cache region: the prefix cache <em>is</em> the free blocks that still
+        carry a hash. The CPU log's “hashed” count stays at 5–6 while the free count returns to
+        145: the blocks are available to anyone, and still findable until reused.
+      </p>
+    </div>
+  </div>
+
+  <h3>Pressure: eviction and preemption</h3>
+  <div class="prose">
+    <p>
+      The <code>pressure</code> scenario shrinks the pool to 2,176 tokens on both devices
+      (<code>--num-gpu-blocks-override</code>: 17 usable 128-token blocks on the CPU, 136 usable
+      16-token blocks on the GPU) and sends four 448-token prompts at once, each producing 128
+      tokens. Four prompts fit (1,792 tokens). Four finished sequences (4 × 576 = 2,304) do not.
+    </p>
+  </div>
+<pre><code><span class="c"># CPU: 17 usable blocks of 128                                  free</span>
+Q1, Q2 admitted: blocks [1-4], [5-8]                                9
+Q4, Q3 admitted: blocks [9-12], [13-16]                             1   <span class="c"># 448 tokens = 3.5 blocks -> 4 each</span>
+<span class="c"># ... 64 decode steps fit in the half-empty 4th blocks ...</span>
+Q1 +[17]  Q2 +[16]  PREEMPTED Q3                                   3   <span class="c"># all cross 512 at once; 1 free block</span>
+Q4 +[15]  evicted from prefix cache: [15]                          2   <span class="c"># Q3's cached block, gone</span>
+Q1, Q2 finished.  Q3 RESUMED: hit 256, blocks [13 14 16 17]         8   <span class="c"># recompute 256 of 512 tokens</span>
+
+<span class="c"># GPU: 136 usable blocks of 16                                  free</span>
+Q1-Q4 admitted: 28 blocks each                                     22
+<span class="c"># ... one new block per request every 16 tokens ...</span>
+Q1 +[2] Q2 +[1]  evicted [2 1];  Q3 +[4] Q4 +[3]  evicted [4 3]      0   <span class="c"># warm-up's cached blocks go first</span>
+Q1 +[3]  Q2 +[136]  PREEMPTED Q4   evicted [136]                     32
+Q3 +[132]; Q1 +[128] Q2 +[124]; Q3 +[120]  each evicted             28   <span class="c"># Q4's decode blocks, tail first</span>
+Q3 finished.  Q4 RESUMED: hit 448 of 544, 96 tokens recomputed      66   <span class="c"># all 28 prompt blocks survived</span></code></pre>
+
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/k-cpu-int8-default-pressure-pressure.png" alt="CPU pressure run: free blocks drop to 1, Q3 is preempted at step 80 and its KV drops to zero, then it resumes at step 143 with 256 tokens recovered from the cache." loading="lazy" />
+    <figcaption>
+      <strong>CPU: free blocks (top) and each request's tokens in the cache (bottom).</strong> The
+      pool is full after admission. Q1 and Q2 cross a 128-token boundary in the same step (Q3 and
+      Q4, admitted one step later, cross in the next), and only one block is free, so Q3 loses
+      all its KV. It waits ~3&nbsp;s, then resumes
+      with 256 tokens recovered from its own cached blocks. Its resume step takes 357&nbsp;ms,
+      against 50&nbsp;ms for a decode step.
+    </figcaption>
+  </figure>
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/k-gpu-fp8-default-pressure-pressure.png" alt="GPU pressure run: free blocks decrease in steps of four every 16 tokens, the warm-up's cached blocks are evicted, Q4 is preempted, and resumes with its 448 prompt tokens recovered." loading="lazy" />
+    <figcaption>
+      <strong>GPU: the same pressure, finer blocks.</strong> Free blocks fall by four every 16
+      tokens: one block per request. The pool first gives up the warm-up's cached blocks, then
+      preempts Q4. Because freed blocks are queued tail first, the blocks evicted afterwards are
+      Q4's <em>decode</em> blocks. Its 28 prompt blocks survive, and it resumes with a 448-token
+      hit: a 9&nbsp;ms step instead of a full re-prefill.
+    </figcaption>
+  </figure>
+  <figure class="reveal fig-wide">
+    <img src="assets/journey/k-gpu-fp8-default-pressure-blocks.png" alt="GPU block map for the pressure run: four large regions of prompt blocks, interleaved single decode blocks above them, and Q4's region going empty during its preemption." loading="lazy" />
+    <figcaption>
+      <strong>GPU: the block map of the pressure run.</strong> Each prompt gets a contiguous run of
+      28 blocks, because they were allocated together from an ordered free queue. Decode blocks
+      are handed out one at a time, round robin across requests, so they interleave above. White
+      crosses mark evictions from the prefix cache. Physical contiguity does not matter: attention
+      reads through the block table.
+    </figcaption>
+  </figure>
+
+  <div class="cards">
+    <div class="card red reveal">
+      <div class="card-kicker">block size shapes pressure</div>
+      <h4>Coarse blocks fail together</h4>
+      <p>
+        With 128-token blocks, requests that started together all need their next block within a
+        step of each other. With 16-token blocks the demand arrives four blocks at a time and the pool
+        drains gradually, giving eviction a chance first. Each 128-token CPU block also wastes up
+        to 127 slots at a request's tail: 448-token prompts hold 512 tokens of space.
+      </p>
+    </div>
+    <div class="card purple reveal">
+      <div class="card-kicker">preemption = recompute</div>
+      <h4>vLLM v1 drops KV; the prefix cache softens it</h4>
+      <p>
+        There is no swapping to host memory in this path: a preempted request's blocks are freed
+        and its <code>num_computed_tokens</code> reset. What survives is whatever the free queue has
+        not yet handed to someone else, which is why freeing order matters. On the GPU all of Q4's
+        prompt survived. On the CPU half of Q3's did.
+      </p>
+    </div>
+    <div class="card green reveal">
+      <div class="card-kicker">what the profiler sees</div>
+      <h4>KV management is cheap; its consequences are not</h4>
+      <p>
+        All of this bookkeeping happens inside <code>schedule()</code>, which costs 0.2–0.5&nbsp;ms per
+        step (chapter 4). The costs it causes are elsewhere: a recompute step (357&nbsp;ms vs
+        50&nbsp;ms on the CPU), a preempted request's stalled stream, and a prefill skipped
+        entirely on a hit.
+      </p>
+    </div>
+  </div>
+
+  <div class="callout trap reveal">
+    <span class="callout-label">One request, many chunks — or fewer</span>
+    <p>
+      The client counts streamed chunks as tokens. In the GPU eager prefix run, P4's four tokens
+      arrived in three chunks (<code>usage.completion_tokens = 4</code>): when the engine produces a request's next output before the API server has streamed the
+      previous one, <code>RequestOutputCollector</code> merges the two deltas into one SSE chunk
+      (<span class="src">v1/engine/output_processor.py:53</span>). Use
+      <code>usage</code>, not chunk counts, when token counts matter.
+    </p>
+  </div>
+</section>
 <section class="section wrap" id="diy">
   <div class="section-head">
-    <div class="section-num">08 · do it yourself</div>
+    <div class="section-num">10 · do it yourself</div>
     <h2>Profiling vLLM: the knobs, the files, the traps</h2>
     <p class="lead">
       Everything in this guide came from vLLM's built-in torch profiler, py-spy, and a client
@@ -1894,6 +2352,10 @@ qwen3.<span class="f">compute_logits</span> → LogitsProcessor → lm_head   <s
 <pre><code><span class="c"># one device, one mode, one scenario (seconds of load; the GPU leg refuses to start above 80 °C)</span>
 DEVICE=cpu MODE=default SCENARIO=single    harness/journey_run.sh
 DEVICE=gpu MODE=eager   SCENARIO=staggered harness/journey_run.sh
+
+<span class="c"># the comparable 8-bit pair, and the KV-cache scenarios (block-level probe on)</span>
+DEVICE=cpu VARIANT=int8 harness/journey_batch.sh "default single" "default prefix" "default pressure"
+DEVICE=gpu VARIANT=fp8  harness/journey_batch.sh                     <span class="c"># all four mode x scenario</span>
 
 <span class="c"># what the harness passes to vllm serve, the part that matters for profiling</span>
 --profiler-config '{"profiler":"torch","torch_profiler_dir":"…",
@@ -1944,7 +2406,8 @@ analysis/trace_tree.py $T --annotation 8 --root '_process_engine_step' --depth 1
     <li>
       <h4>Regenerate the analysis and figures</h4>
 <pre><code>analysis/journey.py --run all          <span class="c"># milestones, step tables, merged Perfetto traces</span>
-analysis/journey_figures.py            <span class="c"># figures/journey/*.png</span></code></pre>
+analysis/journey_figures.py            <span class="c"># figures/journey/*.png (--weights quant for int8/fp8)</span>
+analysis/kvcache.py --run gpu-fp8-default-pressure   <span class="c"># step log of blocks, figures k-*.png</span></code></pre>
     </li>
   </ol>
 
@@ -2034,7 +2497,7 @@ analysis/journey_figures.py            <span class="c"># figures/journey/*.png</
 
 <section class="section wrap" id="corrections">
   <div class="section-head">
-    <div class="section-num">09 · what changed</div>
+    <div class="section-num">11 · what changed</div>
     <h2>Corrections to the earlier write-up</h2>
     <p class="lead">
       The first version of this study compared op-class costs and missed parts of how vLLM
@@ -2071,6 +2534,11 @@ analysis/journey_figures.py            <span class="c"># figures/journey/*.png</
     <div class="term"><dt>CUDA graph</dt><dd>A captured sequence of kernel launches replayed with one call. FULL graphs cover the whole decode forward; PIECEWISE graphs cover the pieces between attention calls.</dd></div>
     <div class="term"><dt>torch.compile / Inductor</dt><dd>Traces the model and generates fused kernels: C++ on the CPU, Triton on the GPU. GEMMs and attention stay library or custom-op calls.</dd></div>
     <div class="term"><dt>eager</dt><dd><code>--enforce-eager</code>: no compilation, no CUDA graphs; every module runs as written.</dd></div>
+    <div class="term"><dt>block table</dt><dd>A request's list of physical KV block ids, in token order. The scheduler keeps it; the worker copies it to the device every step.</dd></div>
+    <div class="term"><dt>slot mapping</dt><dd>For each token computed this step, the cache slot its K and V are written to: block_id × block_size + offset.</dd></div>
+    <div class="term"><dt>prefix caching</dt><dd>Reusing full KV blocks whose chained hash matches the start of a new request. The cache is the set of free blocks that still carry a hash.</dd></div>
+    <div class="term"><dt>preemption</dt><dd>When a running request cannot get a block, the last-admitted one is stopped, its blocks freed and its progress reset; it is re-run later, helped by whatever is still cached.</dd></div>
+    <div class="term"><dt>W8A8</dt><dd>8-bit weights and 8-bit activations: int8 on this CPU, fp8 on this GPU; activations quantized per token at run time.</dd></div>
   </dl>
 </section>
 
@@ -2081,10 +2549,12 @@ analysis/journey_figures.py            <span class="c"># figures/journey/*.png</
     <div>
       <div class="footer-mark"><span class="brand-dot"></span>vLLM request journey</div>
       <p>
-        vLLM 0.33.0 (<code>4ba787ec99</code>), Qwen3-0.6B. CPU leg: Intel i7-12800H, fp32. GPU leg:
-        RTX 4060 Laptop 8&nbsp;GB on an AMD Ryzen 9 7940HS, bf16. Captures:
-        <code>harness/journey_run.sh</code>. Analysis and figures: <code>analysis/journey.py</code>,
-        <code>analysis/journey_figures.py</code>. Raw traces are not committed; client timings,
+        vLLM 0.33.0 (<code>4ba787ec99</code>), Qwen3-0.6B (reference) and its int8 / fp8 W8A8
+        checkpoints. CPU leg: Intel i7-12800H, fp32 and int8. GPU leg: RTX 4060 Laptop 8&nbsp;GB on
+        an AMD Ryzen 9 7940HS, bf16 and fp8. Captures: <code>harness/journey_run.sh</code>,
+        <code>harness/journey_batch.sh</code>; KV probe: <code>harness/kvprobe/</code>. Analysis and
+        figures: <code>analysis/journey.py</code>, <code>analysis/journey_figures.py</code>,
+        <code>analysis/kvcache.py</code>. Raw traces are not committed; client timings,
         manifests, server logs and milestone tables are in <code>results/journey/</code>.
       </p>
       <p>
