@@ -1,0 +1,106 @@
+=== cpu int8 default single 21:08:26
++ booting cpu-int8-default-single (eager=0, worker_in_engine=0, profile=1, kv_probe=0); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/cpu-int8-default-single.serve.log
++ waiting for http://127.0.0.1:8000/health .................................... up
++ start_profile (max_iterations=60)
++ py-spy sampling engine core pid 1730695
+absorb: prompt    32  tokens   4  ttft     168.7 ms  itl    85.4 ms
+     R: prompt   512  tokens  32  ttft     799.3 ms  itl    85.1 ms
++ stop_profile
+WARN: stop_profile returned non-2xx
++ waiting for traces to be flushed ...
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/cpu-int8-default-single.manifest.json
+processes: {'APIServer': 1730574, 'EngineCore': 1730695, 'Worker': 1730752}
+trace files:
+  akamra-thinkpadp1gen5.bos.csb_1730574.async_llm.1794794984652099005.pt.trace.json.gz
+  akamra-thinkpadp1gen5.bos.csb_1730574.async_llm.profiler_out.txt
+  enginecore.pyspy.chrometrace.json
+  pyspy.log
+  rank0.1794794992359875172.pt.trace.json.gz
+=== cpu int8 eager single 21:11:29
++ booting cpu-int8-eager-single (eager=1, worker_in_engine=1, profile=1, kv_probe=0); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/cpu-int8-eager-single.serve.log
++ waiting for http://127.0.0.1:8000/health ............. up
++ start_profile (max_iterations=60)
+absorb: prompt    32  tokens   4  ttft     179.5 ms  itl   102.0 ms
+     R: prompt   512  tokens  32  ttft     857.0 ms  itl    91.4 ms
++ stop_profile
++ waiting for traces to be flushed ...
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/cpu-int8-eager-single.manifest.json
+processes: {'APIServer': 1731955, 'EngineCore': 1732053}
+trace files:
+  akamra-thinkpadp1gen5.bos.csb_1731955.async_llm.1794795122386939406.pt.trace.json.gz
+  akamra-thinkpadp1gen5.bos.csb_1731955.async_llm.profiler_out.txt
+  rank0.1794795124750875128.pt.trace.json.gz
+  rank0.profiler_out.txt
+=== cpu int8 eager staggered 21:12:49
++ booting cpu-int8-eager-staggered (eager=1, worker_in_engine=1, profile=1, kv_probe=0); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/cpu-int8-eager-staggered.serve.log
++ waiting for http://127.0.0.1:8000/health ........ up
++ start_profile (max_iterations=120)
+absorb: prompt    32  tokens   4  ttft     101.3 ms  itl    66.0 ms
+     A: prompt   512  tokens  24  ttft     684.4 ms  itl   166.4 ms
+     B: prompt  1024  tokens  16  ttft    1688.8 ms  itl   121.8 ms
+     C: prompt   256  tokens  16  ttft     449.8 ms  itl   102.4 ms
+     D: prompt   512  tokens   8  ttft     371.1 ms  itl    92.7 ms
++ stop_profile
++ waiting for traces to be flushed ...
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/cpu-int8-eager-staggered.manifest.json
+processes: {'APIServer': 1732534, 'EngineCore': 1732614}
+trace files:
+  akamra-thinkpadp1gen5.bos.csb_1732534.async_llm.1794795192422105681.pt.trace.json.gz
+  akamra-thinkpadp1gen5.bos.csb_1732534.async_llm.profiler_out.txt
+  rank0.1794795193433892060.pt.trace.json.gz
+  rank0.profiler_out.txt
+=== cpu int8 default staggered 21:13:50
++ booting cpu-int8-default-staggered (eager=0, worker_in_engine=0, profile=1, kv_probe=0); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/cpu-int8-default-staggered.serve.log
++ waiting for http://127.0.0.1:8000/health ........................... up
++ start_profile (max_iterations=120)
++ py-spy sampling engine core pid 1733039
+absorb: prompt    32  tokens   4  ttft     100.0 ms  itl    59.8 ms
+     A: prompt   512  tokens  24  ttft     667.2 ms  itl   164.1 ms
+     B: prompt  1024  tokens  16  ttft    1774.1 ms  itl   111.0 ms
+     C: prompt   256  tokens  16  ttft     463.0 ms  itl    89.1 ms
+     D: prompt   512  tokens   8  ttft     333.0 ms  itl    79.9 ms
++ stop_profile
+WARN: stop_profile returned non-2xx
++ waiting for traces to be flushed ...
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/cpu-int8-default-staggered.manifest.json
+processes: {'APIServer': 1732963, 'EngineCore': 1733039, 'Worker': 1733096}
+trace files:
+  akamra-thinkpadp1gen5.bos.csb_1732963.async_llm.1794795290487314268.pt.trace.json.gz
+  akamra-thinkpadp1gen5.bos.csb_1732963.async_llm.profiler_out.txt
+  enginecore.pyspy.chrometrace.json
+  pyspy.log
+  rank0.1794795296016558486.pt.trace.json.gz
+=== cpu int8 default prefix 21:16:10
++ booting cpu-int8-default-prefix (eager=0, worker_in_engine=0, profile=1, kv_probe=1); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/cpu-int8-default-prefix.serve.log
++ waiting for http://127.0.0.1:8000/health ........................... up
++ start_profile (max_iterations=120)
++ py-spy sampling engine core pid 1734280
+absorb: prompt    32  tokens   4  ttft     109.3 ms  itl    60.6 ms
+    P1: prompt   512  tokens  16  ttft     665.6 ms  itl    99.7 ms
+    P2: prompt   512  tokens  16  ttft     336.7 ms  itl    89.1 ms
+    P3: prompt   512  tokens   8  ttft     243.5 ms  itl    64.8 ms
+    P4: prompt   512  tokens   4  ttft     219.6 ms  itl    63.7 ms
++ stop_profile
+WARN: stop_profile returned non-2xx
++ waiting for traces to be flushed ........................................................................................................................
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/cpu-int8-default-prefix.manifest.json
+processes: {'APIServer': 1734192, 'EngineCore': 1734280, 'Worker': 1734351}
+trace files:
+  akamra-thinkpadp1gen5.bos.csb_1734192.async_llm.1794795431113881599.pt.trace.json.gz
+  akamra-thinkpadp1gen5.bos.csb_1734192.async_llm.profiler_out.txt
+  enginecore.pyspy.chrometrace.json
+  pyspy.log
+=== cpu int8 default pressure 21:21:38
++ booting cpu-int8-default-pressure (eager=0, worker_in_engine=0, profile=0, kv_probe=1); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/cpu-int8-default-pressure.serve.log
++ waiting for http://127.0.0.1:8000/health .......................... up
+absorb: prompt    32  tokens   4  ttft      71.9 ms  itl    38.1 ms
+    Q1: prompt   448  tokens 128  ttft    1050.5 ms  itl    59.4 ms
+    Q2: prompt   448  tokens 128  ttft    1050.9 ms  itl    59.4 ms
+    Q3: prompt   448  tokens 128  ttft    2112.4 ms  itl    74.3 ms
+    Q4: prompt   448  tokens 128  ttft    2112.7 ms  itl    53.8 ms
+
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/cpu-int8-default-pressure.manifest.json
+processes: {'APIServer': 1736326, 'EngineCore': 1736407, 'Worker': 1736450}
+trace files:
+ALL_DONE
+NOTE: 'eager single' above overlapped a figure-generation job on the same cores and was recaptured afterwards on an idle machine (TTFT 759.6 ms, ITL 92.5 ms); results/journey/cpu-int8-eager-single.* are the recapture.

@@ -1,0 +1,579 @@
+{
+ "tag": "gpu-fp8-default-single",
+ "steps": [
+  {
+   "i": 0,
+   "ctx_reqs": 1,
+   "ctx_tokens": 32,
+   "gen_reqs": 0,
+   "gen_tokens": 0,
+   "name": "execute_context_1(32)_generation_0(0)",
+   "ctx_owner": "absorb",
+   "cached_tokens": null,
+   "dur_ms": 11.31
+  },
+  {
+   "i": 1,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 1.49
+  },
+  {
+   "i": 2,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 1.53
+  },
+  {
+   "i": 3,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.91
+  },
+  {
+   "i": 4,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 0,
+   "gen_tokens": 0,
+   "name": "execute_context_0(0)_generation_0(0)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 0.29
+  },
+  {
+   "i": 5,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 0,
+   "gen_tokens": 0,
+   "name": "execute_context_0(0)_generation_0(0)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 0.23
+  },
+  {
+   "i": 6,
+   "ctx_reqs": 1,
+   "ctx_tokens": 512,
+   "gen_reqs": 0,
+   "gen_tokens": 0,
+   "name": "execute_context_1(512)_generation_0(0)",
+   "ctx_owner": "R",
+   "cached_tokens": null,
+   "dur_ms": 33.27
+  },
+  {
+   "i": 7,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 1.66
+  },
+  {
+   "i": 8,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 1.72
+  },
+  {
+   "i": 9,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 1.87
+  },
+  {
+   "i": 10,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 1.66
+  },
+  {
+   "i": 11,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 1.95
+  },
+  {
+   "i": 12,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.06
+  },
+  {
+   "i": 13,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.11
+  },
+  {
+   "i": 14,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.18
+  },
+  {
+   "i": 15,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 1.6
+  },
+  {
+   "i": 16,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 1.99
+  },
+  {
+   "i": 17,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.45
+  },
+  {
+   "i": 18,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.6
+  },
+  {
+   "i": 19,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.54
+  },
+  {
+   "i": 20,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.47
+  },
+  {
+   "i": 21,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.08
+  },
+  {
+   "i": 22,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.05
+  },
+  {
+   "i": 23,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.1
+  },
+  {
+   "i": 24,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.13
+  },
+  {
+   "i": 25,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.38
+  },
+  {
+   "i": 26,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.11
+  },
+  {
+   "i": 27,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.38
+  },
+  {
+   "i": 28,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.32
+  },
+  {
+   "i": 29,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.54
+  },
+  {
+   "i": 30,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.18
+  },
+  {
+   "i": 31,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 1.94
+  },
+  {
+   "i": 32,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.08
+  },
+  {
+   "i": 33,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.54
+  },
+  {
+   "i": 34,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.49
+  },
+  {
+   "i": 35,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 1.53
+  },
+  {
+   "i": 36,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 2.12
+  },
+  {
+   "i": 37,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 1.86
+  },
+  {
+   "i": 38,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 0,
+   "gen_tokens": 0,
+   "name": "execute_context_0(0)_generation_0(0)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 0.34
+  },
+  {
+   "i": 39,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 0,
+   "gen_tokens": 0,
+   "name": "execute_context_0(0)_generation_0(0)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 0.31
+  }
+ ],
+ "milestones_R": [
+  {
+   "key": "client_send",
+   "label": "client sends the HTTP request",
+   "where": "client",
+   "ms_from_send": 0.0
+  },
+  {
+   "key": "http",
+   "label": "uvicorn parses the request, FastAPI routes it",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 0.846
+  },
+  {
+   "key": "create_completion",
+   "label": "OpenAI completions handler starts",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 2.235
+  },
+  {
+   "key": "tokenize",
+   "label": "prompt tokenized (HF fast tokenizer, helper thread)",
+   "where": "API server \u00b7 tokenizer",
+   "ms_from_send": 2.914
+  },
+  {
+   "key": "tokenize_end",
+   "label": "tokenization done",
+   "where": "API server \u00b7 tokenizer",
+   "ms_from_send": 4.604
+  },
+  {
+   "key": "add_request",
+   "label": "AsyncLLM.add_request: build EngineCoreRequest",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 6.553
+  },
+  {
+   "key": "zmq_send",
+   "label": "request sent to the engine over ZMQ",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 7.031
+  },
+  {
+   "key": "engine_recv",
+   "label": "engine input thread decodes it into a Request",
+   "where": "EngineCore \u00b7 input thread",
+   "ms_from_send": 7.51
+  },
+  {
+   "key": "sched_add",
+   "label": "Scheduler.add_request: request enters WAITING",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 8.063
+  },
+  {
+   "key": "schedule",
+   "label": "schedule(): request admitted, KV blocks allocated",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 8.165
+  },
+  {
+   "key": "step_start",
+   "label": "prefill step starts (512 tokens)",
+   "where": "model runner",
+   "ms_from_send": 9.643
+  },
+  {
+   "key": "gpu_first",
+   "label": "first GPU kernel of the step",
+   "where": "GPU",
+   "ms_from_send": 10.233
+  },
+  {
+   "key": "step_end",
+   "label": "step annotation ends (forward + logits done on host)",
+   "where": "model runner",
+   "ms_from_send": 42.91
+  },
+  {
+   "key": "sample",
+   "label": "sample_tokens: sampler picks the token",
+   "where": "model runner",
+   "ms_from_send": 42.971
+  },
+  {
+   "key": "gpu_last",
+   "label": "last GPU kernel of the step finishes",
+   "where": "GPU",
+   "ms_from_send": 44.181
+  },
+  {
+   "key": "update",
+   "label": "update_from_output: token appended, stop checks",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 45.772
+  },
+  {
+   "key": "engine_send",
+   "label": "engine output thread sends EngineCoreOutputs (ZMQ)",
+   "where": "EngineCore \u00b7 output thread",
+   "ms_from_send": 46.418
+  },
+  {
+   "key": "api_recv",
+   "label": "API server receives and decodes the outputs",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 46.776
+  },
+  {
+   "key": "process_outputs",
+   "label": "OutputProcessor: per-request state update",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 46.995
+  },
+  {
+   "key": "detokenize",
+   "label": "incremental detokenization",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 47.036
+  },
+  {
+   "key": "http_send",
+   "label": "SSE chunk written to the socket",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 47.575
+  },
+  {
+   "key": "client_first",
+   "label": "client receives the first token",
+   "where": "client",
+   "ms_from_send": 47.715
+  }
+ ]
+}

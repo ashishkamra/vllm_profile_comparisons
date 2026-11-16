@@ -1,0 +1,18 @@
+step    1 +  0.000s free 3166/3169 hashed    2 | warmup admitted: prefix hit 0 tok, blocks [1, 2]
+step    2 +  0.013s free 3165/3169 hashed    2 | warmup +block [3]
+step   10 +  0.046s free 3168/3169 hashed    2 | finished (blocks freed) warmup
+step   11 +  0.202s free 3166/3169 hashed    4 | absorb admitted: prefix hit 0 tok, blocks [3, 4]
+step   12 +  0.214s free 3165/3169 hashed    4 | absorb +block [5]
+step   16 +  0.231s free 3168/3169 hashed    4 | finished (blocks freed) absorb
+step   17 +  0.738s free 3136/3169 hashed   36 | P1 admitted: prefix hit 0 tok, blocks [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]
+step   18 +  0.769s free 3135/3169 hashed   36 | P1 +block [37]
+step   23 +  0.790s free 3127/3169 hashed   44 shared {'5': 2, '6': 2, '7': 2, '8': 2, '9': 2, '10': 2, '11': 2, '12': 2, '13': 2, '14': 2, '15': 2, '16': 2, '17': 2, '18': 2, '19': 2, '20': 2, '21': 2, '22': 2, '23': 2, '24': 2, '25': 2, '26': 2, '27': 2, '28': 2} | P2 admitted: prefix hit 384 tok, blocks [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 38, 39, 40, 41, 42, 43, 44, 45]
+step   24 +  0.832s free 3126/3169 hashed   44 shared {'5': 2, '6': 2, '7': 2, '8': 2, '9': 2, '10': 2, '11': 2, '12': 2, '13': 2, '14': 2, '15': 2, '16': 2, '17': 2, '18': 2, '19': 2, '20': 2, '21': 2, '22': 2, '23': 2, '24': 2, '25': 2, '26': 2, '27': 2, '28': 2} | P2 +block [46]
+step   34 +  0.889s free 3135/3169 hashed   44 | finished (blocks freed) P1
+step   40 +  0.917s free 3168/3169 hashed   44 | finished (blocks freed) P2
+step   41 +  1.424s free 3136/3169 hashed   52 | P3 admitted: prefix hit 384 tok, blocks [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 46, 37, 47, 48, 49, 50, 51, 52]
+step   42 +  1.456s free 3135/3169 hashed   52 | P3 +block [53]
+step   50 +  1.492s free 3168/3169 hashed   52 | finished (blocks freed) P3
+step   51 +  2.000s free 3136/3169 hashed   52 | P4 admitted: prefix hit 496 tok, blocks [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 53]
+step   52 +  2.017s free 3135/3169 hashed   52 | P4 +block [54]
+step   56 +  2.035s free 3168/3169 hashed   52 | finished (blocks freed) P4

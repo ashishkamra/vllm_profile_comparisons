@@ -1,0 +1,557 @@
+{
+ "j2-inbound-cpu-int8-eager-single": [
+  {
+   "n": 1,
+   "key": "client_send",
+   "label": "client sends the HTTP request",
+   "where": "client",
+   "ms_from_send": 0.0
+  },
+  {
+   "n": 2,
+   "key": "http",
+   "label": "uvicorn parses the request, FastAPI routes it",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 0.765
+  },
+  {
+   "n": 3,
+   "key": "create_completion",
+   "label": "OpenAI completions handler starts",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 1.682
+  },
+  {
+   "n": 4,
+   "key": "tokenize",
+   "label": "prompt tokenized (HF fast tokenizer, helper thread)",
+   "where": "API server \u00b7 tokenizer",
+   "ms_from_send": 2.139
+  },
+  {
+   "n": 5,
+   "key": "tokenize_end",
+   "label": "tokenization done",
+   "where": "API server \u00b7 tokenizer",
+   "ms_from_send": 2.833
+  },
+  {
+   "n": 6,
+   "key": "add_request",
+   "label": "AsyncLLM.add_request: build EngineCoreRequest",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 3.766
+  },
+  {
+   "n": 7,
+   "key": "zmq_send",
+   "label": "request sent to the engine over ZMQ",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 4.108
+  },
+  {
+   "n": 8,
+   "key": "engine_recv",
+   "label": "engine input thread decodes it into a Request",
+   "where": "EngineCore \u00b7 input thread",
+   "ms_from_send": 4.612
+  },
+  {
+   "n": 9,
+   "key": "sched_add",
+   "label": "Scheduler.add_request: request enters WAITING",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 4.871
+  },
+  {
+   "n": 10,
+   "key": "schedule",
+   "label": "schedule(): request admitted, KV blocks allocated",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 4.92
+  },
+  {
+   "n": 11,
+   "key": "step_start",
+   "label": "prefill step starts (512 tokens)",
+   "where": "model runner",
+   "ms_from_send": 5.8
+  }
+ ],
+ "j3-outbound-cpu-int8-eager-single": [
+  {
+   "n": 1,
+   "key": "sample",
+   "label": "sample_tokens: sampler picks the token",
+   "where": "model runner",
+   "ms_from_send": 756.517
+  },
+  {
+   "n": 2,
+   "key": "update",
+   "label": "update_from_output: token appended, stop checks",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 757.131
+  },
+  {
+   "n": 3,
+   "key": "engine_send",
+   "label": "engine output thread sends EngineCoreOutputs (ZMQ)",
+   "where": "EngineCore \u00b7 output thread",
+   "ms_from_send": 758.086
+  },
+  {
+   "n": 4,
+   "key": "api_recv",
+   "label": "API server receives and decodes the outputs",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 758.722
+  },
+  {
+   "n": 5,
+   "key": "process_outputs",
+   "label": "OutputProcessor: per-request state update",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 758.906
+  },
+  {
+   "n": 6,
+   "key": "detokenize",
+   "label": "incremental detokenization",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 758.942
+  },
+  {
+   "n": 7,
+   "key": "http_send",
+   "label": "SSE chunk written to the socket",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 759.506
+  },
+  {
+   "n": 8,
+   "key": "client_first",
+   "label": "client receives the first token",
+   "where": "client",
+   "ms_from_send": 759.641
+  }
+ ],
+ "j2-inbound-gpu-fp8-default-single": [
+  {
+   "n": 1,
+   "key": "client_send",
+   "label": "client sends the HTTP request",
+   "where": "client",
+   "ms_from_send": 0.0
+  },
+  {
+   "n": 2,
+   "key": "http",
+   "label": "uvicorn parses the request, FastAPI routes it",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 0.846
+  },
+  {
+   "n": 3,
+   "key": "create_completion",
+   "label": "OpenAI completions handler starts",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 2.235
+  },
+  {
+   "n": 4,
+   "key": "tokenize",
+   "label": "prompt tokenized (HF fast tokenizer, helper thread)",
+   "where": "API server \u00b7 tokenizer",
+   "ms_from_send": 2.914
+  },
+  {
+   "n": 5,
+   "key": "tokenize_end",
+   "label": "tokenization done",
+   "where": "API server \u00b7 tokenizer",
+   "ms_from_send": 4.604
+  },
+  {
+   "n": 6,
+   "key": "add_request",
+   "label": "AsyncLLM.add_request: build EngineCoreRequest",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 6.553
+  },
+  {
+   "n": 7,
+   "key": "zmq_send",
+   "label": "request sent to the engine over ZMQ",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 7.031
+  },
+  {
+   "n": 8,
+   "key": "engine_recv",
+   "label": "engine input thread decodes it into a Request",
+   "where": "EngineCore \u00b7 input thread",
+   "ms_from_send": 7.51
+  },
+  {
+   "n": 9,
+   "key": "sched_add",
+   "label": "Scheduler.add_request: request enters WAITING",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 8.063
+  },
+  {
+   "n": 10,
+   "key": "schedule",
+   "label": "schedule(): request admitted, KV blocks allocated",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 8.165
+  },
+  {
+   "n": 11,
+   "key": "step_start",
+   "label": "prefill step starts (512 tokens)",
+   "where": "model runner",
+   "ms_from_send": 9.643
+  },
+  {
+   "n": 12,
+   "key": "gpu_first",
+   "label": "first GPU kernel of the step",
+   "where": "GPU",
+   "ms_from_send": 10.233
+  }
+ ],
+ "j3-outbound-gpu-fp8-default-single": [
+  {
+   "n": 1,
+   "key": "sample",
+   "label": "sample_tokens: sampler picks the token",
+   "where": "model runner",
+   "ms_from_send": 42.971
+  },
+  {
+   "n": 2,
+   "key": "gpu_last",
+   "label": "last GPU kernel of the step finishes",
+   "where": "GPU",
+   "ms_from_send": 44.181
+  },
+  {
+   "n": 3,
+   "key": "update",
+   "label": "update_from_output: token appended, stop checks",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 45.772
+  },
+  {
+   "n": 4,
+   "key": "engine_send",
+   "label": "engine output thread sends EngineCoreOutputs (ZMQ)",
+   "where": "EngineCore \u00b7 output thread",
+   "ms_from_send": 46.418
+  },
+  {
+   "n": 5,
+   "key": "api_recv",
+   "label": "API server receives and decodes the outputs",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 46.776
+  },
+  {
+   "n": 6,
+   "key": "process_outputs",
+   "label": "OutputProcessor: per-request state update",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 46.995
+  },
+  {
+   "n": 7,
+   "key": "detokenize",
+   "label": "incremental detokenization",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 47.036
+  },
+  {
+   "n": 8,
+   "key": "http_send",
+   "label": "SSE chunk written to the socket",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 47.575
+  },
+  {
+   "n": 9,
+   "key": "client_first",
+   "label": "client receives the first token",
+   "where": "client",
+   "ms_from_send": 47.715
+  }
+ ],
+ "j2-inbound-cpu-int8-default-single": [
+  {
+   "n": 1,
+   "key": "client_send",
+   "label": "client sends the HTTP request",
+   "where": "client",
+   "ms_from_send": 0.0
+  },
+  {
+   "n": 2,
+   "key": "http",
+   "label": "uvicorn parses the request, FastAPI routes it",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 0.616
+  },
+  {
+   "n": 3,
+   "key": "create_completion",
+   "label": "OpenAI completions handler starts",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 1.896
+  },
+  {
+   "n": 4,
+   "key": "tokenize",
+   "label": "prompt tokenized (HF fast tokenizer, helper thread)",
+   "where": "API server \u00b7 tokenizer",
+   "ms_from_send": 2.503
+  },
+  {
+   "n": 5,
+   "key": "tokenize_end",
+   "label": "tokenization done",
+   "where": "API server \u00b7 tokenizer",
+   "ms_from_send": 3.32
+  },
+  {
+   "n": 6,
+   "key": "add_request",
+   "label": "AsyncLLM.add_request: build EngineCoreRequest",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 4.865
+  },
+  {
+   "n": 7,
+   "key": "zmq_send",
+   "label": "request sent to the engine over ZMQ",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 5.353
+  },
+  {
+   "n": 8,
+   "key": "worker_rpc",
+   "label": "worker process picks up execute_model (shared-memory queue)",
+   "where": "Worker \u00b7 main",
+   "ms_from_send": 6.576
+  },
+  {
+   "n": 9,
+   "key": "step_start",
+   "label": "prefill step starts (512 tokens)",
+   "where": "model runner",
+   "ms_from_send": 6.718
+  }
+ ],
+ "j3-outbound-cpu-int8-default-single": [
+  {
+   "n": 1,
+   "key": "sample",
+   "label": "sample_tokens: sampler picks the token",
+   "where": "model runner",
+   "ms_from_send": 795.917
+  },
+  {
+   "n": 2,
+   "key": "worker_return",
+   "label": "worker returns the sampled token (shared-memory queue)",
+   "where": "Worker \u00b7 main",
+   "ms_from_send": 797.09
+  },
+  {
+   "n": 3,
+   "key": "api_recv",
+   "label": "API server receives and decodes the outputs",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 798.205
+  },
+  {
+   "n": 4,
+   "key": "process_outputs",
+   "label": "OutputProcessor: per-request state update",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 798.41
+  },
+  {
+   "n": 5,
+   "key": "detokenize",
+   "label": "incremental detokenization",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 798.449
+  },
+  {
+   "n": 6,
+   "key": "http_send",
+   "label": "SSE chunk written to the socket",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 799.101
+  },
+  {
+   "n": 7,
+   "key": "client_first",
+   "label": "client receives the first token",
+   "where": "client",
+   "ms_from_send": 799.271
+  }
+ ],
+ "j2-inbound-gpu-fp8-eager-single": [
+  {
+   "n": 1,
+   "key": "client_send",
+   "label": "client sends the HTTP request",
+   "where": "client",
+   "ms_from_send": 0.0
+  },
+  {
+   "n": 2,
+   "key": "http",
+   "label": "uvicorn parses the request, FastAPI routes it",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 0.865
+  },
+  {
+   "n": 3,
+   "key": "create_completion",
+   "label": "OpenAI completions handler starts",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 2.278
+  },
+  {
+   "n": 4,
+   "key": "tokenize",
+   "label": "prompt tokenized (HF fast tokenizer, helper thread)",
+   "where": "API server \u00b7 tokenizer",
+   "ms_from_send": 2.865
+  },
+  {
+   "n": 5,
+   "key": "tokenize_end",
+   "label": "tokenization done",
+   "where": "API server \u00b7 tokenizer",
+   "ms_from_send": 4.645
+  },
+  {
+   "n": 6,
+   "key": "add_request",
+   "label": "AsyncLLM.add_request: build EngineCoreRequest",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 6.05
+  },
+  {
+   "n": 7,
+   "key": "zmq_send",
+   "label": "request sent to the engine over ZMQ",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 6.559
+  },
+  {
+   "n": 8,
+   "key": "engine_recv",
+   "label": "engine input thread decodes it into a Request",
+   "where": "EngineCore \u00b7 input thread",
+   "ms_from_send": 7.142
+  },
+  {
+   "n": 9,
+   "key": "sched_add",
+   "label": "Scheduler.add_request: request enters WAITING",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 7.92
+  },
+  {
+   "n": 10,
+   "key": "schedule",
+   "label": "schedule(): request admitted, KV blocks allocated",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 8.009
+  },
+  {
+   "n": 11,
+   "key": "step_start",
+   "label": "prefill step starts (512 tokens)",
+   "where": "model runner",
+   "ms_from_send": 9.636
+  },
+  {
+   "n": 12,
+   "key": "gpu_first",
+   "label": "first GPU kernel of the step",
+   "where": "GPU",
+   "ms_from_send": 10.253
+  }
+ ],
+ "j3-outbound-gpu-fp8-eager-single": [
+  {
+   "n": 1,
+   "key": "sample",
+   "label": "sample_tokens: sampler picks the token",
+   "where": "model runner",
+   "ms_from_send": 45.916
+  },
+  {
+   "n": 2,
+   "key": "gpu_last",
+   "label": "last GPU kernel of the step finishes",
+   "where": "GPU",
+   "ms_from_send": 47.144
+  },
+  {
+   "n": 3,
+   "key": "update",
+   "label": "update_from_output: token appended, stop checks",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 81.645
+  },
+  {
+   "n": 4,
+   "key": "engine_send",
+   "label": "engine output thread sends EngineCoreOutputs (ZMQ)",
+   "where": "EngineCore \u00b7 output thread",
+   "ms_from_send": 82.168
+  },
+  {
+   "n": 5,
+   "key": "api_recv",
+   "label": "API server receives and decodes the outputs",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 82.569
+  },
+  {
+   "n": 6,
+   "key": "process_outputs",
+   "label": "OutputProcessor: per-request state update",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 82.805
+  },
+  {
+   "n": 7,
+   "key": "detokenize",
+   "label": "incremental detokenization",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 82.85
+  },
+  {
+   "n": 8,
+   "key": "http_send",
+   "label": "SSE chunk written to the socket",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 83.486
+  },
+  {
+   "n": 9,
+   "key": "client_first",
+   "label": "client receives the first token",
+   "where": "client",
+   "ms_from_send": 83.649
+  }
+ ]
+}

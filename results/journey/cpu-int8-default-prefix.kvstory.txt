@@ -1,0 +1,16 @@
+step    1 +  0.000s free  144/146 hashed    0 | warmup admitted: prefix hit 0 tok, blocks [1]
+step    9 +  0.338s free  145/146 hashed    0 | finished (blocks freed) warmup
+step   10 +  0.652s free  144/146 hashed    0 | absorb admitted: prefix hit 0 tok, blocks [1]
+step   14 +  0.926s free  145/146 hashed    0 | finished (blocks freed) absorb
+step   15 +  1.432s free  141/146 hashed    4 | P1 admitted: prefix hit 0 tok, blocks [1, 2, 3, 4]
+step   16 +  2.092s free  140/146 hashed    4 | P1 +block [5]
+step   20 +  2.442s free  139/146 hashed    5 shared {'1': 2, '2': 2, '3': 2} | P2 admitted: prefix hit 384 tok, blocks [1, 2, 3, 6]
+step   21 +  2.691s free  138/146 hashed    5 shared {'1': 2, '2': 2, '3': 2} | P2 +block [7]
+step   31 +  3.588s free  140/146 hashed    5 | finished (blocks freed) P1
+step   36 +  4.028s free  145/146 hashed    5 | finished (blocks freed) P2
+step   37 +  4.532s free  141/146 hashed    6 | P3 admitted: prefix hit 384 tok, blocks [1, 2, 3, 7]
+step   38 +  4.772s free  140/146 hashed    6 | P3 +block [5]
+step   45 +  5.225s free  145/146 hashed    6 | finished (blocks freed) P3
+step   46 +  5.730s free  141/146 hashed    6 | P4 admitted: prefix hit 384 tok, blocks [1, 2, 3, 5]
+step   47 +  5.945s free  140/146 hashed    6 | P4 +block [8]
+step   50 +  6.136s free  145/146 hashed    6 | finished (blocks freed) P4

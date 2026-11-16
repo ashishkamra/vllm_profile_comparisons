@@ -1,0 +1,167 @@
+{
+  "scenario": "prefix",
+  "model": "RedHatAI/Qwen3-0.6B-FP8-dynamic",
+  "clock": "unix seconds (time.time); same clock as trace baseTimeNanoseconds+ts",
+  "requests": [
+    {
+      "name": "absorb",
+      "role": "absorb",
+      "prompt_tokens": 32,
+      "max_tokens": 4,
+      "trigger": null,
+      "token_times": [
+        1794795331.203091,
+        1794795331.230113,
+        1794795331.2564447,
+        1794795331.2568705
+      ],
+      "t_send": 1794795331.13941,
+      "t_headers": 1794795331.141581,
+      "request_id": "cmpl-9efe6ff86991c391",
+      "usage": {
+        "prompt_tokens": 32,
+        "total_tokens": 36,
+        "completion_tokens": 4
+      },
+      "t_done": 1794795331.2570128,
+      "ttft_ms": 63.68,
+      "itl_mean_ms": 17.93
+    },
+    {
+      "name": "P1",
+      "role": "measured",
+      "prompt_tokens": 512,
+      "max_tokens": 16,
+      "trigger": [
+        "absorb",
+        "done"
+      ],
+      "token_times": [
+        1794795331.8381221,
+        1794795331.8661466,
+        1794795331.8944607,
+        1794795331.9220037,
+        1794795331.951088,
+        1794795331.977646,
+        1794795332.0068777,
+        1794795332.0351803,
+        1794795332.0633764,
+        1794795332.091636,
+        1794795332.1196897,
+        1794795332.1497571,
+        1794795332.178588,
+        1794795332.207717,
+        1794795332.2361798,
+        1794795332.2746153
+      ],
+      "t_send": 1794795331.7577703,
+      "t_headers": 1794795331.7619276,
+      "request_id": "cmpl-9b8426f2a0e6166e",
+      "usage": {
+        "prompt_tokens": 512,
+        "total_tokens": 528,
+        "completion_tokens": 16
+      },
+      "t_done": 1794795332.27474,
+      "ttft_ms": 80.35,
+      "itl_mean_ms": 29.1
+    },
+    {
+      "name": "P2",
+      "role": "measured",
+      "prompt_tokens": 512,
+      "max_tokens": 16,
+      "trigger": [
+        "P1",
+        4
+      ],
+      "token_times": [
+        1794795332.0069654,
+        1794795332.035353,
+        1794795332.0634742,
+        1794795332.0917494,
+        1794795332.1197639,
+        1794795332.1498415,
+        1794795332.178679,
+        1794795332.207864,
+        1794795332.2362728,
+        1794795332.2748888,
+        1794795332.3025613,
+        1794795332.3296301,
+        1794795332.3569846,
+        1794795332.3840916,
+        1794795332.411582,
+        1794795332.4121659
+      ],
+      "t_send": 1794795331.922221,
+      "t_headers": 1794795331.9242222,
+      "request_id": "cmpl-91a32bd5f1fd6ad9",
+      "usage": {
+        "prompt_tokens": 512,
+        "total_tokens": 528,
+        "completion_tokens": 16
+      },
+      "t_done": 1794795332.412285,
+      "ttft_ms": 84.74,
+      "itl_mean_ms": 27.01
+    },
+    {
+      "name": "P3",
+      "role": "measured",
+      "prompt_tokens": 512,
+      "max_tokens": 8,
+      "trigger": [
+        "P2",
+        "done"
+      ],
+      "token_times": [
+        1794795332.981182,
+        1794795333.0082915,
+        1794795333.036427,
+        1794795333.0641053,
+        1794795333.0927963,
+        1794795333.122727,
+        1794795333.1510508,
+        1794795333.151603
+      ],
+      "t_send": 1794795332.9126751,
+      "t_headers": 1794795332.916339,
+      "request_id": "cmpl-bf4865da33c5bf3d",
+      "usage": {
+        "prompt_tokens": 512,
+        "total_tokens": 520,
+        "completion_tokens": 8
+      },
+      "t_done": 1794795333.1517289,
+      "ttft_ms": 68.51,
+      "itl_mean_ms": 24.35
+    },
+    {
+      "name": "P4",
+      "role": "measured",
+      "prompt_tokens": 512,
+      "max_tokens": 4,
+      "trigger": [
+        "P3",
+        "done"
+      ],
+      "token_times": [
+        1794795333.7255266,
+        1794795333.7532587,
+        1794795333.7836614
+      ],
+      "t_send": 1794795333.6521912,
+      "t_headers": 1794795333.6553147,
+      "request_id": "cmpl-bcec3880b056dd7b",
+      "usage": {
+        "prompt_tokens": 512,
+        "total_tokens": 516,
+        "completion_tokens": 4
+      },
+      "t_done": 1794795333.7837803,
+      "ttft_ms": 73.34,
+      "itl_mean_ms": 29.07
+    }
+  ],
+  "errors": []
+}

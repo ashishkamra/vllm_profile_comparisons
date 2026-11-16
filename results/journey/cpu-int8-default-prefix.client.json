@@ -1,0 +1,168 @@
+{
+  "scenario": "prefix",
+  "model": "nytopop/Qwen3-0.6B.w8a8",
+  "clock": "unix seconds (time.time); same clock as trace baseTimeNanoseconds+ts",
+  "requests": [
+    {
+      "name": "absorb",
+      "role": "absorb",
+      "prompt_tokens": 32,
+      "max_tokens": 4,
+      "trigger": null,
+      "token_times": [
+        1794795425.5704396,
+        1794795425.6303058,
+        1794795425.6909044,
+        1794795425.7522593
+      ],
+      "t_send": 1794795425.4611716,
+      "t_headers": 1794795425.4761615,
+      "request_id": "cmpl-bd68c605c097c6f9",
+      "usage": {
+        "prompt_tokens": 32,
+        "total_tokens": 36,
+        "completion_tokens": 4
+      },
+      "t_done": 1794795425.7524214,
+      "ttft_ms": 109.27,
+      "itl_mean_ms": 60.61
+    },
+    {
+      "name": "P1",
+      "role": "measured",
+      "prompt_tokens": 512,
+      "max_tokens": 16,
+      "trigger": [
+        "absorb",
+        "done"
+      ],
+      "token_times": [
+        1794795426.9184325,
+        1794795427.004637,
+        1794795427.092383,
+        1794795427.1798713,
+        1794795427.2674775,
+        1794795427.5165777,
+        1794795427.608009,
+        1794795427.6980147,
+        1794795427.7873683,
+        1794795427.8767416,
+        1794795427.966437,
+        1794795428.0561888,
+        1794795428.1455882,
+        1794795428.234946,
+        1794795428.324446,
+        1794795428.414053
+      ],
+      "t_send": 1794795426.2528014,
+      "t_headers": 1794795426.255636,
+      "request_id": "cmpl-9d6de6ce1875c1bd",
+      "usage": {
+        "prompt_tokens": 512,
+        "total_tokens": 528,
+        "completion_tokens": 16
+      },
+      "t_done": 1794795428.4142108,
+      "ttft_ms": 665.63,
+      "itl_mean_ms": 99.71
+    },
+    {
+      "name": "P2",
+      "role": "measured",
+      "prompt_tokens": 512,
+      "max_tokens": 16,
+      "trigger": [
+        "P1",
+        4
+      ],
+      "token_times": [
+        1794795427.516681,
+        1794795427.6081052,
+        1794795427.698123,
+        1794795427.7874744,
+        1794795427.8768382,
+        1794795427.9665267,
+        1794795428.0562708,
+        1794795428.1456733,
+        1794795428.2350297,
+        1794795428.3245409,
+        1794795428.4144225,
+        1794795428.5013762,
+        1794795428.5895224,
+        1794795428.6775117,
+        1794795428.7656682,
+        1794795428.8535998
+      ],
+      "t_send": 1794795427.1799877,
+      "t_headers": 1794795427.1829648,
+      "request_id": "cmpl-a7b4ecf0147e0c2e",
+      "usage": {
+        "prompt_tokens": 512,
+        "total_tokens": 528,
+        "completion_tokens": 16
+      },
+      "t_done": 1794795428.8537285,
+      "ttft_ms": 336.69,
+      "itl_mean_ms": 89.13
+    },
+    {
+      "name": "P3",
+      "role": "measured",
+      "prompt_tokens": 512,
+      "max_tokens": 8,
+      "trigger": [
+        "P2",
+        "done"
+      ],
+      "token_times": [
+        1794795429.5974467,
+        1794795429.6614616,
+        1794795429.7256525,
+        1794795429.790154,
+        1794795429.8553724,
+        1794795429.9201922,
+        1794795429.9859345,
+        1794795430.0507896
+      ],
+      "t_send": 1794795429.3539517,
+      "t_headers": 1794795429.3560658,
+      "request_id": "cmpl-966a3faaedf62fec",
+      "usage": {
+        "prompt_tokens": 512,
+        "total_tokens": 520,
+        "completion_tokens": 8
+      },
+      "t_done": 1794795430.0509393,
+      "ttft_ms": 243.49,
+      "itl_mean_ms": 64.76
+    },
+    {
+      "name": "P4",
+      "role": "measured",
+      "prompt_tokens": 512,
+      "max_tokens": 4,
+      "trigger": [
+        "P3",
+        "done"
+      ],
+      "token_times": [
+        1794795430.7709184,
+        1794795430.8343813,
+        1794795430.8980644,
+        1794795430.9618998
+      ],
+      "t_send": 1794795430.5513284,
+      "t_headers": 1794795430.553608,
+      "request_id": "cmpl-a3b35946184932bd",
+      "usage": {
+        "prompt_tokens": 512,
+        "total_tokens": 516,
+        "completion_tokens": 4
+      },
+      "t_done": 1794795430.9620614,
+      "ttft_ms": 219.59,
+      "itl_mean_ms": 63.66
+    }
+  ],
+  "errors": []
+}

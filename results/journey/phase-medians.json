@@ -1,0 +1,98 @@
+{
+ "cpu-eager-single": {
+  "schedule": 0.499,
+  "prepare_inputs": 1.066,
+  "model_forward(host)": 124.734,
+  "compute_logits(host)": 24.447,
+  "sample_tokens": 0.632,
+  "update_from_output": 0.199,
+  "wait_for_gpu": null,
+  "ITL median": 151.98,
+  "TTFT": 1481.79,
+  "prefill step": 1467.06
+ },
+ "cpu-int8-eager-single": {
+  "schedule": 0.463,
+  "prepare_inputs": 1.023,
+  "model_forward(host)": 62.852,
+  "compute_logits(host)": 20.707,
+  "sample_tokens": 0.558,
+  "update_from_output": 0.179,
+  "wait_for_gpu": null,
+  "ITL median": 88.01,
+  "TTFT": 759.64,
+  "prefill step": 750.56
+ },
+ "cpu-default-single": {
+  "schedule": null,
+  "prepare_inputs": 0.924,
+  "model_forward(host)": 108.743,
+  "compute_logits(host)": 24.418,
+  "sample_tokens": 0.667,
+  "update_from_output": null,
+  "wait_for_gpu": null,
+  "ITL median": 137.42,
+  "TTFT": 1507.72,
+  "prefill step": 1497.5
+ },
+ "cpu-int8-default-single": {
+  "schedule": null,
+  "prepare_inputs": 0.717,
+  "model_forward(host)": 57.813,
+  "compute_logits(host)": 24.718,
+  "sample_tokens": 0.554,
+  "update_from_output": null,
+  "wait_for_gpu": null,
+  "ITL median": 85.94,
+  "TTFT": 799.27,
+  "prefill step": 788.08
+ },
+ "gpu-eager-single": {
+  "schedule": 0.201,
+  "prepare_inputs": 0.894,
+  "model_forward(host)": 18.409,
+  "compute_logits(host)": 0.059,
+  "sample_tokens": 0.32,
+  "update_from_output": 0.089,
+  "wait_for_gpu": 0.011,
+  "ITL median": 20.66,
+  "TTFT": 65.9,
+  "prefill step": 27.62
+ },
+ "gpu-fp8-eager-single": {
+  "schedule": 0.205,
+  "prepare_inputs": 0.82,
+  "model_forward(host)": 27.054,
+  "compute_logits(host)": 0.091,
+  "sample_tokens": 0.351,
+  "update_from_output": 0.095,
+  "wait_for_gpu": 0.012,
+  "ITL median": 29.61,
+  "TTFT": 83.65,
+  "prefill step": 36.21
+ },
+ "gpu-default-single": {
+  "schedule": 0.533,
+  "prepare_inputs": 1.175,
+  "model_forward(host)": 0.344,
+  "compute_logits(host)": 0.099,
+  "sample_tokens": 0.463,
+  "update_from_output": 0.232,
+  "wait_for_gpu": 2.453,
+  "ITL median": 6.36,
+  "TTFT": 42.25,
+  "prefill step": 26.3
+ },
+ "gpu-fp8-default-single": {
+  "schedule": 0.297,
+  "prepare_inputs": 1.105,
+  "model_forward(host)": 0.296,
+  "compute_logits(host)": 0.078,
+  "sample_tokens": 0.391,
+  "update_from_output": 0.111,
+  "wait_for_gpu": 1.458,
+  "ITL median": 4.67,
+  "TTFT": 47.72,
+  "prefill step": 33.27
+ }
+}

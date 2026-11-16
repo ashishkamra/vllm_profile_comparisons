@@ -1,0 +1,11 @@
+step    1 +  0.000s free   16/18 hashed    0 | warmup admitted: prefix hit 0 tok, blocks [1]
+step    9 +  0.337s free   17/18 hashed    0 | finished (blocks freed) warmup
+step   10 +  0.437s free   16/18 hashed    0 | absorb admitted: prefix hit 0 tok, blocks [1]
+step   14 +  0.610s free   17/18 hashed    0 | finished (blocks freed) absorb
+step   15 +  1.115s free    9/18 hashed    6 | Q1 admitted: prefix hit 0 tok, blocks [1, 2, 3, 4] | Q2 admitted: prefix hit 0 tok, blocks [5, 6, 7, 8]
+step   16 +  2.161s free    1/18 hashed   12 | Q4 admitted: prefix hit 0 tok, blocks [9, 10, 11, 12] | Q3 admitted: prefix hit 0 tok, blocks [13, 14, 15, 16]
+step   80 +  6.536s free    3/18 hashed   15 | Q1 +block [17] | Q2 +block [16] | PREEMPTED Q3
+step   81 +  6.587s free    2/18 hashed   14 | Q4 +block [15] | evicted from prefix cache: blocks [15]
+step  143 +  9.699s free    8/18 hashed   16 | Q3 RESUMED: computed 256, blocks +[13, 14, 16, 17] | finished (blocks freed) Q1, Q2
+step  144 + 10.056s free   12/18 hashed   16 | Q3 +block [15] | finished (blocks freed) Q4
+step  207 + 12.664s free   17/18 hashed   16 | finished (blocks freed) Q3

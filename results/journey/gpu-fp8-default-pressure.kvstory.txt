@@ -1,0 +1,27 @@
+step    1 +  0.000s free  134/137 hashed    2 | warmup admitted: prefix hit 0 tok, blocks [1, 2]
+step    2 +  0.012s free  133/137 hashed    2 | warmup +block [3]
+step   10 +  0.045s free  136/137 hashed    2 | finished (blocks freed) warmup
+step   11 +  0.136s free  134/137 hashed    4 | absorb admitted: prefix hit 0 tok, blocks [3, 4]
+step   12 +  0.141s free  133/137 hashed    4 | absorb +block [5]
+step   16 +  0.157s free  136/137 hashed    4 | finished (blocks freed) absorb
+step   17 +  0.666s free   80/137 hashed   60 | Q1 admitted: prefix hit 0 tok, blocks [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] | Q2 admitted: prefix hit 0 tok, blocks [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60]
+step   18 +  0.685s free   22/137 hashed  116 | Q3 admitted: prefix hit 0 tok, blocks [63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90] | Q4 admitted: prefix hit 0 tok, blocks [91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118] | Q1 +block [61] | Q2 +block [62]
+step   19 +  0.703s free   20/137 hashed  116 | Q3 +block [119] | Q4 +block [120]
+step   34 +  0.811s free   18/137 hashed  118 | Q1 +block [121] | Q2 +block [122]
+step   35 +  0.816s free   16/137 hashed  120 | Q3 +block [123] | Q4 +block [124]
+step   50 +  0.895s free   14/137 hashed  122 | Q1 +block [125] | Q2 +block [126]
+step   51 +  0.900s free   12/137 hashed  124 | Q3 +block [127] | Q4 +block [128]
+step   66 +  0.977s free   10/137 hashed  126 | Q1 +block [129] | Q2 +block [130]
+step   67 +  0.982s free    8/137 hashed  128 | Q3 +block [131] | Q4 +block [132]
+step   82 +  1.059s free    6/137 hashed  130 | Q1 +block [133] | Q2 +block [134]
+step   83 +  1.064s free    4/137 hashed  132 | Q3 +block [135] | Q4 +block [136]
+step   98 +  1.143s free    2/137 hashed  132 | Q1 +block [2] | Q2 +block [1] | evicted from prefix cache: blocks [2, 1]
+step   99 +  1.148s free    0/137 hashed  132 | Q3 +block [4] | Q4 +block [3] | evicted from prefix cache: blocks [4, 3]
+step  114 +  1.227s free   32/137 hashed  133 | Q1 +block [3] | Q2 +block [136] | PREEMPTED Q4 | evicted from prefix cache: blocks [136]
+step  115 +  1.232s free   31/137 hashed  133 | Q3 +block [132] | evicted from prefix cache: blocks [132]
+step  130 +  1.307s free   29/137 hashed  133 | Q1 +block [128] | Q2 +block [124] | evicted from prefix cache: blocks [128, 124]
+step  131 +  1.312s free   28/137 hashed  133 | Q3 +block [120] | evicted from prefix cache: blocks [120]
+step  146 +  1.400s free   66/137 hashed  135 | Q4 RESUMED: computed 448, blocks +[91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 124, 128, 3, 2, 133, 129] | finished (blocks freed) Q1, Q2 | evicted from prefix cache: blocks [3, 2, 133, 129]
+step  147 +  1.410s free  101/137 hashed  135 | Q4 +block [120] | finished (blocks freed) Q3
+step  163 +  1.477s free  100/137 hashed  135 | Q4 +block [125] | evicted from prefix cache: blocks [125]
+step  179 +  1.548s free  136/137 hashed  135 | finished (blocks freed) Q4

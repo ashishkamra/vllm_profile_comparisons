@@ -1,0 +1,112 @@
+=== gpu fp8 eager single 21:07:54
++ GPU at 41C before start
++ booting gpu-fp8-eager-single (eager=1, worker_in_engine=1, profile=1, kv_probe=0); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-fp8-eager-single.serve.log
++ waiting for http://127.0.0.1:8000/health .......... up
++ start_profile (max_iterations=60)
+absorb: prompt    32  tokens   4  ttft      74.1 ms  itl    20.2 ms
+     R: prompt   512  tokens  32  ttft      83.7 ms  itl    28.7 ms
++ stop_profile
++ waiting for traces to be flushed ...
++ GPU at 46C after run
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-fp8-eager-single.manifest.json
+processes: {'APIServer': 238280, 'EngineCore': 238367}
+trace files:
+  fedora_238280.async_llm.1794794896537344536.pt.trace.json.gz
+  fedora_238280.async_llm.profiler_out.txt
+  rank0.1794794898648769516.pt.trace.json.gz
+  rank0.profiler_out.txt
+=== gpu fp8 eager staggered 21:09:28
++ GPU at 45C before start
++ booting gpu-fp8-eager-staggered (eager=1, worker_in_engine=1, profile=1, kv_probe=0); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-fp8-eager-staggered.serve.log
++ waiting for http://127.0.0.1:8000/health .......... up
++ start_profile (max_iterations=120)
+absorb: prompt    32  tokens   4  ttft      76.1 ms  itl    20.6 ms
+     A: prompt   512  tokens  24  ttft      83.5 ms  itl    30.8 ms
+     B: prompt  1024  tokens  16  ttft     148.8 ms  itl    31.5 ms
+     C: prompt   256  tokens  16  ttft      92.8 ms  itl    29.6 ms
+     D: prompt   512  tokens   8  ttft      91.8 ms  itl    32.3 ms
++ stop_profile
++ waiting for traces to be flushed ...
++ GPU at 48C after run
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-fp8-eager-staggered.manifest.json
+processes: {'APIServer': 239363, 'EngineCore': 239454}
+trace files:
+  fedora_239363.async_llm.1794794990420507977.pt.trace.json.gz
+  fedora_239363.async_llm.profiler_out.txt
+  rank0.1794794992184916199.pt.trace.json.gz
+  rank0.profiler_out.txt
+=== gpu fp8 default staggered 21:10:56
++ GPU at 46C before start
++ booting gpu-fp8-default-staggered (eager=0, worker_in_engine=0, profile=1, kv_probe=0); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-fp8-default-staggered.serve.log
++ waiting for http://127.0.0.1:8000/health .......................... up
++ start_profile (max_iterations=120)
+absorb: prompt    32  tokens   4  ttft      20.2 ms  itl     4.6 ms
+     A: prompt   512  tokens  24  ttft      47.9 ms  itl     8.3 ms
+     B: prompt  1024  tokens  16  ttft      95.0 ms  itl     5.8 ms
+     C: prompt   256  tokens  16  ttft      38.1 ms  itl     5.9 ms
+     D: prompt   512  tokens   8  ttft      21.8 ms  itl     6.9 ms
++ stop_profile
++ waiting for traces to be flushed ...
++ GPU at 53C after run
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-fp8-default-staggered.manifest.json
+processes: {'APIServer': 239881, 'EngineCore': 239971}
+trace files:
+  fedora_239881.async_llm.1794795112101458859.pt.trace.json.gz
+  fedora_239881.async_llm.profiler_out.txt
+  rank0.1794795112435225834.pt.trace.json.gz
+  rank0.profiler_out.txt
+=== gpu fp8 default prefix 21:12:35
++ GPU at 49C before start
++ booting gpu-fp8-default-prefix (eager=0, worker_in_engine=0, profile=1, kv_probe=1); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-fp8-default-prefix.serve.log
++ waiting for http://127.0.0.1:8000/health ......................... up
++ start_profile (max_iterations=120)
+absorb: prompt    32  tokens   4  ttft      28.2 ms  itl     4.4 ms
+    P1: prompt   512  tokens  16  ttft      41.0 ms  itl     7.8 ms
+    P2: prompt   512  tokens  16  ttft      51.6 ms  itl     5.3 ms
+    P3: prompt   512  tokens   8  ttft      43.0 ms  itl     4.5 ms
+    P4: prompt   512  tokens   4  ttft      29.2 ms  itl     4.2 ms
++ stop_profile
++ waiting for traces to be flushed ...
++ GPU at 53C after run
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-fp8-default-prefix.manifest.json
+processes: {'APIServer': 240780, 'EngineCore': 240870}
+trace files:
+  fedora_240780.async_llm.1794795208208336672.pt.trace.json.gz
+  fedora_240780.async_llm.profiler_out.txt
+  rank0.1794795208512609530.pt.trace.json.gz
+  rank0.profiler_out.txt
+=== gpu fp8 default pressure 21:14:11
++ GPU at 50C before start
++ booting gpu-fp8-default-pressure (eager=0, worker_in_engine=0, profile=0, kv_probe=1); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-fp8-default-pressure.serve.log
++ waiting for http://127.0.0.1:8000/health ............ up
+absorb: prompt    32  tokens   4  ttft      14.9 ms  itl     4.4 ms
+    Q1: prompt   448  tokens 128  ttft      45.1 ms  itl     5.5 ms
+    Q2: prompt   448  tokens 128  ttft      44.5 ms  itl     5.5 ms
+    Q3: prompt   448  tokens 128  ttft      82.0 ms  itl     5.3 ms
+    Q4: prompt   448  tokens 128  ttft      81.6 ms  itl     6.3 ms
+
++ GPU at 52C after run
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-fp8-default-pressure.manifest.json
+processes: {'APIServer': 241383, 'EngineCore': 241459}
+trace files:
+=== gpu fp8 eager prefix 21:15:08
++ GPU at 49C before start
++ booting gpu-fp8-eager-prefix (eager=1, worker_in_engine=1, profile=1, kv_probe=1); log: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-fp8-eager-prefix.serve.log
++ waiting for http://127.0.0.1:8000/health ........... up
++ start_profile (max_iterations=120)
+absorb: prompt    32  tokens   4  ttft      63.7 ms  itl    17.9 ms
+    P1: prompt   512  tokens  16  ttft      80.3 ms  itl    29.1 ms
+    P2: prompt   512  tokens  16  ttft      84.7 ms  itl    27.0 ms
+    P3: prompt   512  tokens   8  ttft      68.5 ms  itl    24.4 ms
+    P4: prompt   512  tokens   3  ttft      73.3 ms  itl    29.1 ms
++ stop_profile
++ waiting for traces to be flushed ...
++ GPU at 50C after run
+manifest: /home/akamra/workspace/vllm_profile_comparisons/results/journey/gpu-fp8-eager-prefix.manifest.json
+processes: {'APIServer': 241782, 'EngineCore': 241875}
+trace files:
+  fedora_241782.async_llm.1794795333928968414.pt.trace.json.gz
+  fedora_241782.async_llm.profiler_out.txt
+  rank0.1794795335697634842.pt.trace.json.gz
+  rank0.profiler_out.txt
+ALL_DONE

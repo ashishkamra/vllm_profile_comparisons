@@ -1,0 +1,545 @@
+{
+ "tag": "cpu-int8-eager-single",
+ "steps": [
+  {
+   "i": 0,
+   "ctx_reqs": 1,
+   "ctx_tokens": 32,
+   "gen_reqs": 0,
+   "gen_tokens": 0,
+   "name": "execute_context_1(32)_generation_0(0)",
+   "ctx_owner": "absorb",
+   "cached_tokens": null,
+   "dur_ms": 138.58
+  },
+  {
+   "i": 1,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 80.57
+  },
+  {
+   "i": 2,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 79.82
+  },
+  {
+   "i": 3,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 82.42
+  },
+  {
+   "i": 4,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 0,
+   "gen_tokens": 0,
+   "name": "execute_context_0(0)_generation_0(0)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 0.52
+  },
+  {
+   "i": 5,
+   "ctx_reqs": 1,
+   "ctx_tokens": 512,
+   "gen_reqs": 0,
+   "gen_tokens": 0,
+   "name": "execute_context_1(512)_generation_0(0)",
+   "ctx_owner": "R",
+   "cached_tokens": null,
+   "dur_ms": 750.56
+  },
+  {
+   "i": 6,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 70.89
+  },
+  {
+   "i": 7,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 93.69
+  },
+  {
+   "i": 8,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 86.99
+  },
+  {
+   "i": 9,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 86.65
+  },
+  {
+   "i": 10,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 85.37
+  },
+  {
+   "i": 11,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 84.7
+  },
+  {
+   "i": 12,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 84.43
+  },
+  {
+   "i": 13,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 88.51
+  },
+  {
+   "i": 14,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 86.13
+  },
+  {
+   "i": 15,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 84.73
+  },
+  {
+   "i": 16,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 84.54
+  },
+  {
+   "i": 17,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 84.96
+  },
+  {
+   "i": 18,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 84.73
+  },
+  {
+   "i": 19,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 86.67
+  },
+  {
+   "i": 20,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 88.06
+  },
+  {
+   "i": 21,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 86.4
+  },
+  {
+   "i": 22,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 85.7
+  },
+  {
+   "i": 23,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 87.23
+  },
+  {
+   "i": 24,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 86.62
+  },
+  {
+   "i": 25,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 85.99
+  },
+  {
+   "i": 26,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 87.27
+  },
+  {
+   "i": 27,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 84.63
+  },
+  {
+   "i": 28,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 87.28
+  },
+  {
+   "i": 29,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 83.83
+  },
+  {
+   "i": 30,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 87.55
+  },
+  {
+   "i": 31,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 84.42
+  },
+  {
+   "i": 32,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 103.81
+  },
+  {
+   "i": 33,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 153.11
+  },
+  {
+   "i": 34,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 152.82
+  },
+  {
+   "i": 35,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 88.28
+  },
+  {
+   "i": 36,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 1,
+   "gen_tokens": 1,
+   "name": "execute_context_0(0)_generation_1(1)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 84.39
+  },
+  {
+   "i": 37,
+   "ctx_reqs": 0,
+   "ctx_tokens": 0,
+   "gen_reqs": 0,
+   "gen_tokens": 0,
+   "name": "execute_context_0(0)_generation_0(0)",
+   "ctx_owner": null,
+   "cached_tokens": null,
+   "dur_ms": 0.32
+  }
+ ],
+ "milestones_R": [
+  {
+   "key": "client_send",
+   "label": "client sends the HTTP request",
+   "where": "client",
+   "ms_from_send": 0.0
+  },
+  {
+   "key": "http",
+   "label": "uvicorn parses the request, FastAPI routes it",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 0.765
+  },
+  {
+   "key": "create_completion",
+   "label": "OpenAI completions handler starts",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 1.682
+  },
+  {
+   "key": "tokenize",
+   "label": "prompt tokenized (HF fast tokenizer, helper thread)",
+   "where": "API server \u00b7 tokenizer",
+   "ms_from_send": 2.139
+  },
+  {
+   "key": "tokenize_end",
+   "label": "tokenization done",
+   "where": "API server \u00b7 tokenizer",
+   "ms_from_send": 2.833
+  },
+  {
+   "key": "add_request",
+   "label": "AsyncLLM.add_request: build EngineCoreRequest",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 3.766
+  },
+  {
+   "key": "zmq_send",
+   "label": "request sent to the engine over ZMQ",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 4.108
+  },
+  {
+   "key": "engine_recv",
+   "label": "engine input thread decodes it into a Request",
+   "where": "EngineCore \u00b7 input thread",
+   "ms_from_send": 4.612
+  },
+  {
+   "key": "sched_add",
+   "label": "Scheduler.add_request: request enters WAITING",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 4.871
+  },
+  {
+   "key": "schedule",
+   "label": "schedule(): request admitted, KV blocks allocated",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 4.92
+  },
+  {
+   "key": "step_start",
+   "label": "prefill step starts (512 tokens)",
+   "where": "model runner",
+   "ms_from_send": 5.8
+  },
+  {
+   "key": "step_end",
+   "label": "step annotation ends (forward + logits done on host)",
+   "where": "model runner",
+   "ms_from_send": 756.357
+  },
+  {
+   "key": "sample",
+   "label": "sample_tokens: sampler picks the token",
+   "where": "model runner",
+   "ms_from_send": 756.517
+  },
+  {
+   "key": "update",
+   "label": "update_from_output: token appended, stop checks",
+   "where": "EngineCore \u00b7 main",
+   "ms_from_send": 757.131
+  },
+  {
+   "key": "engine_send",
+   "label": "engine output thread sends EngineCoreOutputs (ZMQ)",
+   "where": "EngineCore \u00b7 output thread",
+   "ms_from_send": 758.086
+  },
+  {
+   "key": "api_recv",
+   "label": "API server receives and decodes the outputs",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 758.722
+  },
+  {
+   "key": "process_outputs",
+   "label": "OutputProcessor: per-request state update",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 758.906
+  },
+  {
+   "key": "detokenize",
+   "label": "incremental detokenization",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 758.942
+  },
+  {
+   "key": "http_send",
+   "label": "SSE chunk written to the socket",
+   "where": "API server \u00b7 main",
+   "ms_from_send": 759.506
+  },
+  {
+   "key": "client_first",
+   "label": "client receives the first token",
+   "where": "client",
+   "ms_from_send": 759.641
+  }
+ ]
+}
