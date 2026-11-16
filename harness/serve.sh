@@ -56,7 +56,10 @@ if [ -n "${PROFILE_DIR:-}" ]; then
   # qkv from o_proj from lm_head (docs/03-stage-taxonomy.md axis B), so the whole
   # per-layer breakdown would collapse into "linear". It costs some overhead; it
   # is enabled identically on both legs.
-  ARGS+=(--profiler-config "{\"profiler\":\"torch\",\"torch_profiler_dir\":\"$PROFILE_DIR\",\"torch_profiler_activities\":$ACT,\"torch_profiler_with_stack\":true,\"torch_profiler_record_shapes\":true,\"torch_profiler_use_gzip\":true}")
+  # PROFILE_SHAPES=0 drops shapes where they are not needed: exporting a long
+  # CPU worker trace with shapes can take more than 16 GB.
+  if [ "${PROFILE_SHAPES:-1}" = "1" ]; then SHAPES=true; else SHAPES=false; fi
+  ARGS+=(--profiler-config "{\"profiler\":\"torch\",\"torch_profiler_dir\":\"$PROFILE_DIR\",\"torch_profiler_activities\":$ACT,\"torch_profiler_with_stack\":true,\"torch_profiler_record_shapes\":$SHAPES,\"torch_profiler_use_gzip\":true}")
 fi
 
 # Scenario-specific scheduler knobs (e.g. a small --max-num-batched-tokens so a

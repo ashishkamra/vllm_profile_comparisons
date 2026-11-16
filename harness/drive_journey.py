@@ -63,6 +63,16 @@ def build_prompt(target: str, model: str, n_tokens: int, preamble: str, timeout:
     return text, len(ids)
 
 
+def build_ids(target: str, model: str, n_tokens: int, preamble: str, timeout: float) -> list[int]:
+    """Exactly n_tokens token IDs. Sent as a token-ID prompt, so concatenating two
+    of them gives a sequence whose boundaries are exact: a 384-token prefix is
+    exactly 3 CPU blocks (128) or 24 GPU blocks (16), whatever the text."""
+    text = preamble + FILLER * (n_tokens // 8 + 8)
+    ids = post(target, "/tokenize", {"model": model, "prompt": text, "add_special_tokens": False}, timeout)["tokens"]
+    assert len(ids) >= n_tokens, (len(ids), n_tokens)
+    return ids[:n_tokens]
+
+
 class Progress:
     """Tokens received per request, so one request can wait for another's k-th token."""
 
@@ -157,6 +167,34 @@ def scenario_specs(name: str) -> list[dict]:
             dict(name="D", same_prompt_as="A", prompt_tokens=512, max_tokens=8,
                  trigger=("A", 14)),
         ]
+    if name == "prefix":
+        # KV-cache sharing. P1..P4 share a 384-token prefix (sent as token IDs).
+        # P2 runs alongside P1: both block tables point at the same physical
+        # prefix blocks. P3 arrives after both finished: the prefix blocks are
+        # free but still cached. P4 repeats P1's whole prompt.
+        sys_prompt = ("Shared system prompt. ", 384)
+        return [
+            dict(name="absorb", role="absorb", preamble="Absorb the profiler start-up. ",
+                 prompt_tokens=32, max_tokens=4),
+            dict(name="P1", prefix=sys_prompt, suffix=("First user turn. ", 128),
+                 max_tokens=16, trigger=("absorb", "done")),
+            dict(name="P2", prefix=sys_prompt, suffix=("Second user turn. ", 128),
+                 max_tokens=16, trigger=("P1", 4)),
+            dict(name="P3", prefix=sys_prompt, suffix=("Third user turn. ", 128),
+                 max_tokens=8, trigger=("P2", "done")),
+            dict(name="P4", prefix=sys_prompt, suffix=("First user turn. ", 128),
+                 max_tokens=4, trigger=("P3", "done")),
+        ]
+    if name == "pressure":
+        # KV-cache pressure. journey_run.sh shrinks the pool to 2,176 tokens: four
+        # 448-token prompts fit, four 576-token sequences do not, so the
+        # scheduler has to preempt while they decode.
+        specs = [dict(name="absorb", role="absorb", preamble="Absorb the profiler start-up. ",
+                      prompt_tokens=32, max_tokens=4)]
+        for i in range(1, 5):
+            specs.append(dict(name=f"Q{i}", prefix=(f"Request Q{i}, its own text. ", 448),
+                              max_tokens=128, trigger=("absorb", "done")))
+        return specs
     raise SystemExit(f"unknown scenario {name}")
 
 
@@ -164,7 +202,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--target", default="http://127.0.0.1:8000")
     ap.add_argument("--model", required=True)
-    ap.add_argument("--scenario", choices=["single", "staggered"], required=True)
+    ap.add_argument("--scenario", choices=["single", "staggered", "prefix", "pressure"], required=True)
     ap.add_argument("--timeout", type=float, default=900.0)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -172,7 +210,12 @@ def main() -> int:
     specs = scenario_specs(args.scenario)
     prompts: dict[str, tuple[str, int]] = {}
     for s in specs:
-        if "same_prompt_as" in s:
+        if "prefix" in s:
+            ids = build_ids(args.target, args.model, s["prefix"][1], s["prefix"][0], args.timeout)
+            if s.get("suffix"):
+                ids = ids + build_ids(args.target, args.model, s["suffix"][1], s["suffix"][0], args.timeout)
+            prompts[s["name"]] = (ids, len(ids))
+        elif "same_prompt_as" in s:
             prompts[s["name"]] = prompts[s["same_prompt_as"]]
         else:
             prompts[s["name"]] = build_prompt(
